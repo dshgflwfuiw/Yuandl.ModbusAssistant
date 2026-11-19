@@ -1,386 +1,519 @@
-using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.IO.Ports;
-using System.Text.Json;
-using System.Threading.Tasks;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
+using System.Windows;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
-using Yuandl.ModbusAssistant.Models.Connection;
+using Yuandl.ModbusAssistant.Models;
 using Yuandl.ModbusAssistant.Protocol.Modbus;
 using Yuandl.ModbusAssistant.Services;
-using Yuandl.ThemeUI.Controls;
-using Yuandl.ThemeUI.Enums;
-using Yuandl.ThemeUI.Extensions;
-using Yuandl.ThemeUI.Services;
 
 namespace Yuandl.ModbusAssistant.ViewModels.Pages;
 
-/// <summary>
-/// 通讯连接页面 ViewModel
-/// 负责串口 (RS232/RS485)、TCP Client、UDP 等通讯链路的参数配置、端口探测与连接管理
-/// </summary>
-public partial class ConnectionViewModel : ViewModelBase
+public sealed class ServerRegisterRowViewModel : ObservableObject
 {
-    private readonly ICommunicationService _communicationService;
-    private readonly ISnackbarService _snackbarService;
-    private readonly HslModbusServerService? _serverService;
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-    private string ConfigurationPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Yuandl.ModbusAssistant", "modbus-server.json");
+    public ServerRegisterArea Area { get; set; }
+    public int Address { get; set; }
+    public ServerRegisterDataType DataType { get; set; }
+    public ServerRegisterByteOrder ByteOrder { get; set; }
+    public string InitialValue { get; set; } = "0";
+    public string Note { get; set; } = string.Empty;
 
-    [ObservableProperty] private int serverPort = 5020;
-    [ObservableProperty] private byte serverStation = 1;
-    [ObservableProperty] private bool isServerRunning;
-    [ObservableProperty] private string serverStatusText = "服务器已停止";
-    [ObservableProperty] private ObservableCollection<ServerRegisterDefinition> serverRegisters = [];
-    [ObservableProperty] private ServerRegisterDefinition? selectedServerRegister;
-    [ObservableProperty] private ServerRegisterArea selectedRegisterArea = ServerRegisterArea.HoldingRegister;
-    [ObservableProperty] private ServerRegisterDataType selectedRegisterDataType = ServerRegisterDataType.UInt16;
-    [ObservableProperty] private ServerRegisterByteOrder selectedRegisterByteOrder = ServerRegisterByteOrder.BigEndian;
-    [ObservableProperty] private ushort serverRegisterAddress;
-    [ObservableProperty] private string serverRegisterValue = "0";
-    [ObservableProperty] private string serverRegisterNote = string.Empty;
-
-    public ServerRegisterArea[] RegisterAreaOptions { get; } = Enum.GetValues<ServerRegisterArea>();
-    public ServerRegisterDataType[] RegisterDataTypeOptions { get; } = Enum.GetValues<ServerRegisterDataType>();
-    public ServerRegisterByteOrder[] RegisterByteOrderOptions { get; } = Enum.GetValues<ServerRegisterByteOrder>();
-
-    partial void OnSelectedRegisterAreaChanged(ServerRegisterArea value)
+    private string _currentValue = "0";
+    public string CurrentValue
     {
-        var bitArea = value is ServerRegisterArea.Coil or ServerRegisterArea.DiscreteInput;
-        if (bitArea) SelectedRegisterDataType = ServerRegisterDataType.Bit;
-        else if (SelectedRegisterDataType == ServerRegisterDataType.Bit) SelectedRegisterDataType = ServerRegisterDataType.UInt16;
+        get => _currentValue;
+        set => SetProperty(ref _currentValue, value);
     }
 
-    // 通讯类型选择: 0 = 串口, 1 = TCP Client, 2 = UDP
-    [ObservableProperty]
-    private int selectedCommTypeIndex = 0;
-
-    [ObservableProperty]
-    private bool isConnected;
-
-    [ObservableProperty]
-    private string connectionStateText = "未连接";
-
-    // ====== 串口参数 ======
-    [ObservableProperty]
-    private ObservableCollection<string> availablePorts = [];
-
-    [ObservableProperty]
-    private string selectedPort = "COM1";
-
-    [ObservableProperty]
-    private int selectedBaudRate = 9600;
-
-    public int[] BaudRateOptions { get; } = [1200, 2400, 4800, 9600, 14400, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
-
-    [ObservableProperty]
-    private int dataBits = 8;
-
-    public int[] DataBitsOptions { get; } = [7, 8];
-
-    [ObservableProperty]
-    private Parity selectedParity = Parity.None;
-
-    public Parity[] ParityOptions { get; } = [Parity.None, Parity.Odd, Parity.Even, Parity.Mark, Parity.Space];
-
-    [ObservableProperty]
-    private StopBits selectedStopBits = StopBits.One;
-
-    public StopBits[] StopBitsOptions { get; } = [StopBits.One, StopBits.Two, StopBits.OnePointFive];
-
-    [ObservableProperty]
-    private bool dtrEnable = true;
-
-    [ObservableProperty]
-    private bool rtsEnable = true;
-
-    // ====== TCP Client 参数 ======
-    [ObservableProperty]
-    private string tcpHost = "127.0.0.1";
-
-    [ObservableProperty]
-    private int tcpPort = 502;
-
-    [ObservableProperty]
-    private int connectTimeoutMs = 3000;
-
-    [ObservableProperty]
-    private bool autoReconnect = false;
-
-    // ====== UDP 参数 ======
-    [ObservableProperty]
-    private string udpRemoteHost = "127.0.0.1";
-
-    [ObservableProperty]
-    private int udpRemotePort = 502;
-
-    [ObservableProperty]
-    private int udpLocalPort = 0;
-
-    public ConnectionViewModel(ICommunicationService communicationService, ISnackbarService snackbarService, HslModbusServerService? serverService = null)
+    public ServerRegisterDefinition ToModel() => new()
     {
-        _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
-        _snackbarService = snackbarService ?? throw new ArgumentNullException(nameof(snackbarService));
-        _serverService = serverService;
+        Area = Area,
+        Address = Address,
+        DataType = DataType,
+        ByteOrder = ByteOrder,
+        InitialValue = InitialValue,
+        Note = Note,
+        CurrentValue = CurrentValue
+    };
+}
 
-        Title = "通讯连接";
+public sealed class ConnectionViewModel : ObservableObject
+{
+    private readonly CommunicationService _comm;
+    private readonly ModbusServerService _server;
+    private readonly PersistenceService _persistence;
 
-        RefreshSerialPorts();
+    public ConnectionViewModel(CommunicationService comm, ModbusServerService server, PersistenceService persistence)
+    {
+        _comm = comm;
+        _server = server;
+        _persistence = persistence;
 
-        LoadDefaultServerConfiguration();
-        _communicationService.StateChanged += (s, e) =>
+        RefreshPorts();
+        LoadSavedServerConfig();
+
+        _comm.StateChanged += (_, s) => RunOnUi(() =>
         {
-            IsConnected = _communicationService.IsConnected;
-            ConnectionStateText = e.NewState switch
+            ChannelState = s;
+            NotifyVisibilityProperties();
+        });
+        _comm.ClientsChanged += (_, clients) => RunOnUi(() =>
+        {
+            ServerClients.Clear();
+            foreach (var c in clients) ServerClients.Add(c);
+        });
+        _server.RegistersMutated += (_, _) => RunOnUi(SyncRuntimeValuesFromServer);
+        _server.StatusChanged += (_, text) => RunOnUi(() =>
+        {
+            ServerStatusText = text;
+            IsModbusServerRunning = _server.IsRunning;
+        });
+
+        RefreshPortsCommand = new RelayCommand(RefreshPorts);
+        ConnectCommand = new AsyncRelayCommand(ConnectAsync);
+        DisconnectCommand = new AsyncRelayCommand(() => _comm.DisconnectAsync());
+        KickClientCommand = new RelayCommand(p =>
+        {
+            if (p is TcpServerClientSession session)
+                _comm.DisconnectServerClient(session.SessionId);
+        });
+
+        StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync);
+        StopServerCommand = new AsyncRelayCommand(() => _server.StopAsync());
+        AddRegisterCommand = new RelayCommand(AddRegisterDefinition);
+        DeleteRegisterCommand = new RelayCommand(p =>
+        {
+            if (p is ServerRegisterRowViewModel row)
             {
-                ChannelState.Connected => "已连接",
-                ChannelState.Connecting => "连接中...",
-                ChannelState.Reconnecting => "重连中...",
-                ChannelState.Faulted => "连接异常",
-                _ => "未连接"
-            };
-        };
+                ServerRegisters.Remove(row);
+                ApplyRegistersToServerAndSave();
+            }
+        });
+        ApplyRuntimeValueCommand = new RelayCommand(p =>
+        {
+            if (p is ServerRegisterRowViewModel row)
+                CommitRuntimeValue(row);
+        });
+        ToggleBitRuntimeCommand = new RelayCommand(p =>
+        {
+            if (p is ServerRegisterRowViewModel row && row.DataType == ServerRegisterDataType.Bit)
+            {
+                row.CurrentValue = row.CurrentValue.Equals("true", StringComparison.OrdinalIgnoreCase) ? "false" : "true";
+                CommitRuntimeValue(row);
+            }
+        });
+        ResetRegistersCommand = new RelayCommand(() =>
+        {
+            _server.ResetToInitialValues();
+            ServerBanner = "已全部重置为初始值";
+        });
+        ExportConfigCommand = new RelayCommand(ExportServerConfig);
+        ImportConfigCommand = new RelayCommand(ImportServerConfig);
     }
 
-    [RelayCommand]
-    public void StartServer()
+    public ObservableCollection<string> AvailablePorts { get; } = new();
+    public ObservableCollection<TcpServerClientSession> ServerClients { get; } = new();
+    public ObservableCollection<ServerRegisterRowViewModel> ServerRegisters { get; } = new();
+
+    public IReadOnlyList<CommunicationType> CommunicationTypes { get; } = Enum.GetValues<CommunicationType>();
+    public IReadOnlyList<int> BaudRates { get; } = new[] { 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400 };
+    public IReadOnlyList<int> DataBitsOptions { get; } = new[] { 7, 8 };
+    public IReadOnlyList<Parity> ParityOptions { get; } = Enum.GetValues<Parity>();
+    public IReadOnlyList<StopBits> StopBitsOptions { get; } = new[] { StopBits.One, StopBits.OnePointFive, StopBits.Two };
+    public IReadOnlyList<ModbusServerTransportMode> ServerTransportModes { get; } = Enum.GetValues<ModbusServerTransportMode>();
+    public IReadOnlyList<ServerRegisterArea> RegisterAreas { get; } = Enum.GetValues<ServerRegisterArea>();
+    public IReadOnlyList<ServerRegisterDataType> RegisterDataTypes { get; } = Enum.GetValues<ServerRegisterDataType>();
+    public IReadOnlyList<ServerRegisterByteOrder> RegisterByteOrders { get; } = Enum.GetValues<ServerRegisterByteOrder>();
+
+    private CommunicationType _selectedType = CommunicationType.TcpClient;
+    public CommunicationType SelectedType
     {
-        try
+        get => _selectedType;
+        set
         {
-            if (_serverService is null) throw new InvalidOperationException("Modbus TCP 服务未配置");
-            _serverService.ConfigureRegisters(ServerRegisters);
-            _serverService.Start(ServerPort, ServerStation);
-            IsServerRunning = _serverService.IsRunning;
-            ServerStatusText = $"运行中：端口 {ServerPort}，站号 {ServerStation}，数据定义 {ServerRegisters.Count} 项";
-            _snackbarService.Show("服务器已启动", $"Modbus TCP Server 监听端口 {ServerPort}", ControlAppearance.Success);
-            SaveDefaultServerConfiguration();
-        }
-        catch (Exception ex)
-        {
-            IsServerRunning = _serverService?.IsRunning == true;
-            ServerStatusText = $"启动失败：{ex.Message}";
-            _snackbarService.Show("服务器启动失败", ex.Message, ControlAppearance.Error);
+            if (SetProperty(ref _selectedType, value))
+                NotifyVisibilityProperties();
         }
     }
 
-    [RelayCommand]
-    public void StopServer()
+    private ChannelState _channelState = ChannelState.Disconnected;
+    public ChannelState ChannelState
     {
-        _serverService?.Stop();
-        IsServerRunning = false;
-        ServerStatusText = "服务器已停止";
-        _snackbarService.Show("服务器已停止", "Modbus TCP Server 已关闭", ControlAppearance.Info);
+        get => _channelState;
+        private set => SetProperty(ref _channelState, value);
     }
 
-    [RelayCommand]
-    public void CreateServerRegister()
+    public SerialPortParameters Serial { get; } = new();
+    public TcpClientParameters TcpClient { get; } = new();
+    public UdpParameters Udp { get; } = new();
+    public TcpServerParameters TcpServer { get; } = new();
+
+    public bool IsSerialSelected => SelectedType == CommunicationType.SerialPort;
+    public bool IsTcpClientSelected => SelectedType == CommunicationType.TcpClient;
+    public bool IsUdpSelected => SelectedType == CommunicationType.Udp;
+    public bool IsTcpServerSelected => SelectedType == CommunicationType.TcpServer;
+
+    private string _connectionError = string.Empty;
+    public string ConnectionError
     {
-        try
-        {
-            var definition = new ServerRegisterDefinition(SelectedRegisterArea, ServerRegisterAddress, SelectedRegisterDataType, SelectedRegisterByteOrder, ServerRegisterValue, ServerRegisterNote);
-            ServerRegisterCodec.Validate(definition);
-            var updated = ServerRegisters.Where(item => item.Area != definition.Area || item.Address != definition.Address).Append(definition).ToArray();
-            ServerRegisterCodec.ValidateNoOverlap(updated);
-            _serverService?.ConfigureRegisters(updated);
-            ServerRegisters = new ObservableCollection<ServerRegisterDefinition>(updated.OrderBy(item => item.Area).ThenBy(item => item.Address));
-            SaveDefaultServerConfiguration();
-            ServerStatusText = $"已配置 {ServerRegisters.Count} 项数据定义";
-            _snackbarService.Show("数据定义已保存", $"{definition.Area} 地址 {definition.Address} = {definition.InitialValue}", ControlAppearance.Success);
-        }
-        catch (Exception ex)
-        {
-            _snackbarService.Show("建立数据定义失败", ex.Message, ControlAppearance.Error);
-        }
+        get => _connectionError;
+        set => SetProperty(ref _connectionError, value);
     }
 
-    [RelayCommand]
-    public void RemoveServerRegister(ServerRegisterDefinition? definition)
+    // Modbus Server settings
+    private ModbusServerTransportMode _serverMode = ModbusServerTransportMode.Tcp;
+    public ModbusServerTransportMode ServerMode
     {
-        if (definition is null) return;
-        try
+        get => _serverMode;
+        set
         {
-            var updated = ServerRegisters.Where(item => item != definition).ToArray();
-            _serverService?.ConfigureRegisters(updated);
-            ServerRegisters = new ObservableCollection<ServerRegisterDefinition>(updated);
-            SelectedServerRegister = null;
-            SaveDefaultServerConfiguration();
-            ServerStatusText = $"已配置 {ServerRegisters.Count} 项数据定义";
-        }
-        catch (Exception ex)
-        {
-            _snackbarService.Show("删除数据定义失败", ex.Message, ControlAppearance.Error);
+            if (SetProperty(ref _serverMode, value))
+            {
+                OnPropertyChanged(nameof(ServerUsesTcp));
+                OnPropertyChanged(nameof(ServerUsesSerial));
+            }
         }
     }
 
-    [RelayCommand]
-    public void ExportServerConfiguration()
+    public bool ServerUsesTcp => ServerMode is ModbusServerTransportMode.Tcp or ModbusServerTransportMode.TcpAndSerial;
+    public bool ServerUsesSerial => ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
+
+    private int _serverPort = 5020;
+    public int ServerPort { get => _serverPort; set => SetProperty(ref _serverPort, value); }
+
+    private int _serverStation = 1;
+    public int ServerStation { get => _serverStation; set => SetProperty(ref _serverStation, value); }
+
+    public SerialPortParameters ServerSerial { get; } = new();
+
+    private bool _isModbusServerRunning;
+    public bool IsModbusServerRunning
     {
-        var dialog = new SaveFileDialog { Filter = "JSON 配置文件 (*.json)|*.json", FileName = "modbus-server.json" };
-        if (dialog.ShowDialog() == true) SaveServerConfiguration(dialog.FileName);
+        get => _isModbusServerRunning;
+        private set => SetProperty(ref _isModbusServerRunning, value);
     }
 
-    [RelayCommand]
-    public void ImportServerConfiguration()
+    private string _serverStatusText = "服务器已停止";
+    public string ServerStatusText
     {
-        var dialog = new OpenFileDialog { Filter = "JSON 配置文件 (*.json)|*.json", CheckFileExists = true };
-        if (dialog.ShowDialog() == true) LoadServerConfiguration(dialog.FileName);
+        get => _serverStatusText;
+        private set => SetProperty(ref _serverStatusText, value);
     }
 
-    private void SaveDefaultServerConfiguration() => SaveServerConfiguration(ConfigurationPath);
-
-    private void SaveServerConfiguration(string path)
+    private string _serverBanner = string.Empty;
+    public string ServerBanner
     {
-        try
-        {
-            var configuration = new ModbusServerConfiguration(1, ServerPort, ServerStation, ServerRegisters.ToArray());
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            File.WriteAllText(path, JsonSerializer.Serialize(configuration, JsonOptions));
-            ServerStatusText = $"配置已保存：{path}";
-        }
-        catch (Exception ex)
-        {
-            ServerStatusText = $"保存失败：{ex.Message}";
-            _snackbarService.Show("配置保存失败", ex.Message, ControlAppearance.Error);
-        }
+        get => _serverBanner;
+        set => SetProperty(ref _serverBanner, value);
     }
 
-    private void LoadDefaultServerConfiguration()
+    // New Register Definition draft
+    private ServerRegisterArea _newArea = ServerRegisterArea.HoldingRegister;
+    public ServerRegisterArea NewArea
     {
-        if (File.Exists(ConfigurationPath)) LoadServerConfiguration(ConfigurationPath);
-    }
-
-    private void LoadServerConfiguration(string path)
-    {
-        try
+        get => _newArea;
+        set
         {
-            var configuration = JsonSerializer.Deserialize<ModbusServerConfiguration>(File.ReadAllText(path))
-                ?? throw new InvalidDataException("配置文件为空或格式不正确");
-            if (configuration.Version != 1) throw new InvalidDataException($"不支持的配置版本：{configuration.Version}");
-            if (configuration.Port is < 1 or > 65535) throw new InvalidDataException("服务器端口必须在 1 至 65535 之间");
-            if (configuration.Station == 0) throw new InvalidDataException("站号不能为 0");
-            foreach (var definition in configuration.Registers) ServerRegisterCodec.Validate(definition);
-            ServerRegisterCodec.ValidateNoOverlap(configuration.Registers);
-            _serverService?.ConfigureRegisters(configuration.Registers);
-            ServerPort = configuration.Port;
-            ServerStation = configuration.Station;
-            ServerRegisters = new ObservableCollection<ServerRegisterDefinition>(configuration.Registers.OrderBy(item => item.Area).ThenBy(item => item.Address));
-            ServerStatusText = $"已加载 {ServerRegisters.Count} 项数据定义";
-        }
-        catch (Exception ex)
-        {
-            ServerStatusText = $"配置加载失败：{ex.Message}";
-            _snackbarService.Show("配置加载失败", ex.Message, ControlAppearance.Error);
+            if (SetProperty(ref _newArea, value))
+            {
+                if (_newArea is ServerRegisterArea.Coil or ServerRegisterArea.DiscreteInput)
+                {
+                    NewDataType = ServerRegisterDataType.Bit;
+                    if (NewInitialValue == "0") NewInitialValue = "false";
+                }
+                else if (NewDataType == ServerRegisterDataType.Bit)
+                {
+                    NewDataType = ServerRegisterDataType.UInt16;
+                    if (NewInitialValue is "false" or "true") NewInitialValue = "0";
+                }
+            }
         }
     }
 
-    [RelayCommand]
-    public void RefreshSerialPorts()
+    private int _newAddress;
+    public int NewAddress { get => _newAddress; set => SetProperty(ref _newAddress, value); }
+
+    private ServerRegisterDataType _newDataType = ServerRegisterDataType.UInt16;
+    public ServerRegisterDataType NewDataType { get => _newDataType; set => SetProperty(ref _newDataType, value); }
+
+    private ServerRegisterByteOrder _newByteOrder = ServerRegisterByteOrder.BigEndian;
+    public ServerRegisterByteOrder NewByteOrder { get => _newByteOrder; set => SetProperty(ref _newByteOrder, value); }
+
+    private string _newInitialValue = "0";
+    public string NewInitialValue { get => _newInitialValue; set => SetProperty(ref _newInitialValue, value); }
+
+    private string _newNote = string.Empty;
+    public string NewNote { get => _newNote; set => SetProperty(ref _newNote, value); }
+
+    public RelayCommand RefreshPortsCommand { get; }
+    public AsyncRelayCommand ConnectCommand { get; }
+    public AsyncRelayCommand DisconnectCommand { get; }
+    public RelayCommand KickClientCommand { get; }
+    public AsyncRelayCommand StartServerCommand { get; }
+    public AsyncRelayCommand StopServerCommand { get; }
+    public RelayCommand AddRegisterCommand { get; }
+    public RelayCommand DeleteRegisterCommand { get; }
+    public RelayCommand ApplyRuntimeValueCommand { get; }
+    public RelayCommand ToggleBitRuntimeCommand { get; }
+    public RelayCommand ResetRegistersCommand { get; }
+    public RelayCommand ExportConfigCommand { get; }
+    public RelayCommand ImportConfigCommand { get; }
+
+    public void RefreshPorts()
     {
         AvailablePorts.Clear();
-        var ports = SerialPort.GetPortNames();
-        foreach (var p in ports)
+        try
         {
-            AvailablePorts.Add(p);
+            foreach (var p in SerialPort.GetPortNames().OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+                AvailablePorts.Add(p);
         }
+        catch { /* ignore on non-Windows host */ }
 
-        if (AvailablePorts.Count > 0)
-        {
-            if (string.IsNullOrEmpty(SelectedPort) || !AvailablePorts.Contains(SelectedPort))
-            {
-                SelectedPort = AvailablePorts[0];
-            }
-        }
-        else
+        if (AvailablePorts.Count == 0)
         {
             AvailablePorts.Add("COM1");
-            SelectedPort = "COM1";
+            AvailablePorts.Add("COM2");
+            AvailablePorts.Add("COM3");
         }
+        if (!AvailablePorts.Contains(Serial.PortName))
+            Serial.PortName = AvailablePorts[0];
+        if (!AvailablePorts.Contains(ServerSerial.PortName))
+            ServerSerial.PortName = AvailablePorts[0];
     }
 
-    [RelayCommand]
-    public async Task ConnectAsync()
+    private async Task ConnectAsync()
     {
-        if (IsConnected)
-        {
-            return;
-        }
-
-        IsBusy = true;
+        ConnectionError = string.Empty;
         try
         {
-            bool success = false;
-            switch (SelectedCommTypeIndex)
+            switch (SelectedType)
             {
-                case 0: // 串口
-                    var serialParams = new SerialPortParameters
-                    {
-                        PortName = SelectedPort,
-                        BaudRate = SelectedBaudRate,
-                        DataBits = DataBits,
-                        Parity = SelectedParity,
-                        StopBits = SelectedStopBits,
-                        DtrEnable = DtrEnable,
-                        RtsEnable = RtsEnable
-                    };
-                    success = await _communicationService.ConnectSerialAsync(serialParams);
+                case CommunicationType.SerialPort:
+                    await _comm.ConnectSerialAsync(Serial);
                     break;
-
-                case 1: // TCP Client
-                    var tcpParams = new TcpClientParameters
-                    {
-                        Host = TcpHost,
-                        Port = TcpPort,
-                        ConnectTimeoutMs = ConnectTimeoutMs,
-                        AutoReconnect = AutoReconnect
-                    };
-                    success = await _communicationService.ConnectTcpAsync(tcpParams);
+                case CommunicationType.TcpClient:
+                    await _comm.ConnectTcpClientAsync(TcpClient);
                     break;
-
-                case 2: // UDP
-                    var udpParams = new UdpParameters
-                    {
-                        RemoteHost = UdpRemoteHost,
-                        RemotePort = UdpRemotePort,
-                        LocalPort = UdpLocalPort
-                    };
-                    success = await _communicationService.ConnectUdpAsync(udpParams);
+                case CommunicationType.Udp:
+                    await _comm.ConnectUdpAsync(Udp);
                     break;
-            }
-
-            if (success)
-            {
-                _snackbarService.Show("连接成功", $"已成功连接到 {_communicationService.CurrentChannelInfo}", ControlAppearance.Success);
+                case CommunicationType.TcpServer:
+                    await _comm.StartTcpServerAsync(TcpServer);
+                    break;
             }
         }
         catch (Exception ex)
         {
-            _snackbarService.Show("连接失败", ex.Message, ControlAppearance.Error);
-        }
-        finally
-        {
-            IsBusy = false;
+            ConnectionError = ex.Message;
         }
     }
 
-    [RelayCommand]
-    public async Task DisconnectAsync()
+    private async Task StartModbusServerAsync()
     {
-        IsBusy = true;
+        ServerBanner = string.Empty;
         try
         {
-            await _communicationService.DisconnectAsync();
-            _snackbarService.Show("连接已断开", "通讯通道已安全关闭", ControlAppearance.Info);
+            ApplyRegistersToServerAndSave();
+            await _server.StartAsync(ServerPort, ServerStation, ServerMode, ServerSerial);
+            SaveServerConfig();
         }
         catch (Exception ex)
         {
-            _snackbarService.Show("断开连接异常", ex.Message, ControlAppearance.Warning);
+            ServerBanner = $"启动失败: {ex.Message}";
         }
-        finally
+    }
+
+    private void AddRegisterDefinition()
+    {
+        ServerBanner = string.Empty;
+        try
         {
-            IsBusy = false;
+            var candidate = new ServerRegisterDefinition
+            {
+                Area = NewArea,
+                Address = NewAddress,
+                DataType = NewDataType,
+                ByteOrder = NewByteOrder,
+                InitialValue = NewInitialValue,
+                CurrentValue = NewInitialValue,
+                Note = NewNote.Trim()
+            };
+            ServerRegisterCodec.Validate(candidate);
+
+            var all = ServerRegisters.Select(r => r.ToModel()).ToList();
+            int existingIdx = all.FindIndex(d => d.Area == candidate.Area && d.Address == candidate.Address);
+            if (existingIdx >= 0) all[existingIdx] = candidate;
+            else all.Add(candidate);
+
+            ServerRegisterCodec.ValidateNoOverlap(all);
+            _server.ConfigureRegisters(all);
+            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+            SaveServerConfig();
+            NewAddress += ServerRegisterCodec.GetWidth(candidate.DataType);
+            NewNote = string.Empty;
+            ServerBanner = "已添加并同步到服务器内存";
         }
+        catch (Exception ex)
+        {
+            ServerBanner = $"定义错误: {ex.Message}";
+        }
+    }
+
+    public void CommitRuntimeValue(ServerRegisterRowViewModel row)
+    {
+        ServerBanner = string.Empty;
+        try
+        {
+            _server.SetRuntimeValue(row.Area, row.Address, row.CurrentValue);
+            ServerBanner = $"已在线更新 {row.Area} @ {row.Address} = {row.CurrentValue}";
+        }
+        catch (Exception ex)
+        {
+            ServerBanner = $"在线修改失败: {ex.Message}";
+            SyncRuntimeValuesFromServer();
+        }
+    }
+
+    private void ApplyRegistersToServerAndSave()
+    {
+        var list = ServerRegisters.Select(r => r.ToModel()).ToList();
+        _server.ConfigureRegisters(list);
+        ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+        SaveServerConfig();
+    }
+
+    private void LoadSavedServerConfig()
+    {
+        var cfg = _persistence.LoadServerConfig();
+        ServerPort = cfg.Port;
+        ServerStation = cfg.Station;
+        ServerMode = cfg.ServerMode;
+        ServerSerial.PortName = cfg.ServerSerial.PortName;
+        ServerSerial.BaudRate = cfg.ServerSerial.BaudRate;
+        ServerSerial.DataBits = cfg.ServerSerial.DataBits;
+        ServerSerial.Parity = cfg.ServerSerial.Parity;
+        ServerSerial.StopBits = cfg.ServerSerial.StopBits;
+
+        try
+        {
+            _server.ConfigureRegisters(cfg.Registers);
+            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+        }
+        catch
+        {
+            ReloadRegisterRows(cfg.Registers);
+        }
+    }
+
+    private void SaveServerConfig()
+    {
+        var cfg = new ModbusServerConfiguration
+        {
+            Port = ServerPort,
+            Station = ServerStation,
+            ServerMode = ServerMode,
+            ServerSerial = ServerSerial.Clone(),
+            Registers = ServerRegisters.Select(r => r.ToModel()).ToList()
+        };
+        _persistence.SaveServerConfig(cfg);
+    }
+
+    private void ReloadRegisterRows(IEnumerable<ServerRegisterDefinition> defs)
+    {
+        ServerRegisters.Clear();
+        foreach (var d in defs)
+        {
+            ServerRegisters.Add(new ServerRegisterRowViewModel
+            {
+                Area = d.Area,
+                Address = d.Address,
+                DataType = d.DataType,
+                ByteOrder = d.ByteOrder,
+                InitialValue = d.InitialValue,
+                Note = d.Note,
+                CurrentValue = d.CurrentValue
+            });
+        }
+    }
+
+    private void SyncRuntimeValuesFromServer()
+    {
+        var latest = _server.GetDefinitionsWithCurrentValues();
+        for (int i = 0; i < latest.Count && i < ServerRegisters.Count; i++)
+        {
+            if (ServerRegisters[i].Area == latest[i].Area && ServerRegisters[i].Address == latest[i].Address)
+                ServerRegisters[i].CurrentValue = latest[i].CurrentValue;
+        }
+    }
+
+    private void ExportServerConfig()
+    {
+        var dlg = new SaveFileDialog
+        {
+            Filter = "JSON 文件 (*.json)|*.json",
+            FileName = $"modbus-server-config-{DateTime.Now:yyyyMMdd}.json"
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            var cfg = new ModbusServerConfiguration
+            {
+                Port = ServerPort,
+                Station = ServerStation,
+                ServerMode = ServerMode,
+                ServerSerial = ServerSerial.Clone(),
+                Registers = ServerRegisters.Select(r => r.ToModel()).ToList()
+            };
+            File.WriteAllText(dlg.FileName, PersistenceService.SerializeServerConfig(cfg));
+            ServerBanner = $"已导出配置: {dlg.FileName}";
+        }
+    }
+
+    private void ImportServerConfig()
+    {
+        var dlg = new OpenFileDialog
+        {
+            Filter = "JSON 文件 (*.json)|*.json"
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            try
+            {
+                var cfg = PersistenceService.DeserializeServerConfig(File.ReadAllText(dlg.FileName))
+                    ?? throw new InvalidDataException("配置文件格式无效");
+                ServerPort = cfg.Port;
+                ServerStation = cfg.Station;
+                ServerMode = cfg.ServerMode;
+                ServerSerial.PortName = cfg.ServerSerial.PortName;
+                ServerSerial.BaudRate = cfg.ServerSerial.BaudRate;
+                ServerSerial.DataBits = cfg.ServerSerial.DataBits;
+                ServerSerial.Parity = cfg.ServerSerial.Parity;
+                ServerSerial.StopBits = cfg.ServerSerial.StopBits;
+
+                _server.ConfigureRegisters(cfg.Registers);
+                ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+                SaveServerConfig();
+                ServerBanner = $"已导入配置 ({cfg.Registers.Count} 项)";
+            }
+            catch (Exception ex)
+            {
+                ServerBanner = $"导入失败: {ex.Message}";
+            }
+        }
+    }
+
+    private void NotifyVisibilityProperties()
+    {
+        OnPropertyChanged(nameof(IsSerialSelected));
+        OnPropertyChanged(nameof(IsTcpClientSelected));
+        OnPropertyChanged(nameof(IsUdpSelected));
+        OnPropertyChanged(nameof(IsTcpServerSelected));
+    }
+
+    private static void RunOnUi(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) action();
+        else dispatcher.Invoke(action);
     }
 }

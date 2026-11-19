@@ -1,36 +1,58 @@
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using Yuandl.ThemeUI.Enums;
-using Yuandl.ThemeUI.Managers;
+using Yuandl.ModbusAssistant.Models;
+using Yuandl.ModbusAssistant.Services;
 
 namespace Yuandl.ModbusAssistant.ViewModels.Pages;
 
-/// <summary>
-/// 系统设置页面 ViewModel
-/// 负责主题切换、通讯默认超时重试、语言与日志策略配置
-/// </summary>
-public partial class SettingsViewModel : ViewModelBase
+public sealed class SettingsViewModel : ObservableObject
 {
-    [ObservableProperty]
-    private int selectedThemeIndex;
+    private readonly PersistenceService _persistence;
 
-    [ObservableProperty]
-    private int defaultTimeoutMs = 1000;
-
-    [ObservableProperty]
-    private int defaultRetryTimes = 2;
-
-    public SettingsViewModel()
+    public SettingsViewModel(PersistenceService persistence)
     {
-        Title = "系统设置";
-        var currentTheme = ApplicationThemeManager.GetAppTheme();
-        selectedThemeIndex = currentTheme == ApplicationTheme.Light ? 0 : 1;
+        _persistence = persistence;
+        var saved = _persistence.LoadSettings();
+        _isDarkTheme = saved.IsDarkTheme;
+        _defaultTimeoutMs = saved.DefaultTimeoutMs;
+        _defaultRetryTimes = saved.DefaultRetryTimes;
+
+        SaveCommand = new RelayCommand(SaveSettings);
     }
 
-    [RelayCommand]
-    private void OnThemeChanged(int index)
+    public event EventHandler<bool>? ThemeChanged;
+
+    private bool _isDarkTheme;
+    public bool IsDarkTheme
     {
-        SelectedThemeIndex = index;
-        ApplicationThemeManager.Apply(index == 0 ? ApplicationTheme.Light : ApplicationTheme.Dark);
+        get => _isDarkTheme;
+        set
+        {
+            if (SetProperty(ref _isDarkTheme, value))
+            {
+                SaveSettings();
+                ThemeChanged?.Invoke(this, value);
+            }
+        }
+    }
+
+    private int _defaultTimeoutMs = 1000;
+    public int DefaultTimeoutMs { get => _defaultTimeoutMs; set => SetProperty(ref _defaultTimeoutMs, value); }
+
+    private int _defaultRetryTimes = 2;
+    public int DefaultRetryTimes { get => _defaultRetryTimes; set => SetProperty(ref _defaultRetryTimes, value); }
+
+    private string _saveBanner = string.Empty;
+    public string SaveBanner { get => _saveBanner; private set => SetProperty(ref _saveBanner, value); }
+
+    public RelayCommand SaveCommand { get; }
+
+    private void SaveSettings()
+    {
+        _persistence.SaveSettings(new AppSettings
+        {
+            IsDarkTheme = IsDarkTheme,
+            DefaultTimeoutMs = DefaultTimeoutMs,
+            DefaultRetryTimes = DefaultRetryTimes
+        });
+        SaveBanner = $"系统设置已保存 ({DateTime.Now:HH:mm:ss})";
     }
 }

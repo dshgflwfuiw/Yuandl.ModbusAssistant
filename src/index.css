@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --app-bg: #f3f3f3;
+  --surface-card: #ffffff;
+  --surface-secondary: #f9f9f9;
+  --surface-hover: #eaeaea;
+  --surface-selected: #e5effa;
+  --border-subtle: #e0e0e0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #5e5e5e;
+  --accent-primary: #0067c0;
+  --accent-primary-hover: #005a9e;
+  --accent-text: #ffffff;
+  --status-connected: #107c41;
+  --status-disconnected: #8a8a8a;
+  --danger: #c42b1c;
+  --danger-hover: #a4262c;
+}
+
+.dark {
+  --app-bg: #1e1e1e;
+  --surface-card: #282828;
+  --surface-secondary: #232323;
+  --surface-hover: #333333;
+  --surface-selected: #213547;
+  --border-subtle: #383838;
+  --text-primary: #f3f3f3;
+  --text-secondary: #a6a6a6;
+  --accent-primary: #4cc2ff;
+  --accent-primary-hover: #38b0ef;
+  --accent-text: #0f172a;
+  --status-connected: #3fb950;
+  --status-disconnected: #8a8a8a;
+  --danger: #e05247;
+  --danger-hover: #c42b1c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--app-bg);
+  color: var(--text-primary);
+  font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono-code {
+  font-family: "Cascadia Code", "Consolas", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.fluent-card {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.fluent-input {
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.fluent-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.fluent-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fluent-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background-color: var(--surface-card);
+  color: var(--text-primary);
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.fluent-btn:hover:not(:disabled) {
+  background-color: var(--surface-hover);
+}
+
+.fluent-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fluent-btn-primary {
+  background-color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--accent-text);
+}
+
+.fluent-btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-primary-hover);
+  border-color: var(--accent-primary-hover);
+}
+
+.fluent-btn-danger {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+.fluent-btn-danger:hover:not(:disabled) {
+  background-color: var(--danger-hover);
+  border-color: var(--danger-hover);
+}

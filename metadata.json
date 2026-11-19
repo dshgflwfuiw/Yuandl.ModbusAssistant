@@ -1,0 +1,5 @@
+{
+  "name": "Yuandl Modbus Assistant",
+  "description": "工业级 Modbus 与无协议通讯调试助手（串口/TCP/UDP连接管理、Modbus帧调试、无协议收发、寄存器监视、报文分析与内置Modbus TCP服务器）",
+  "requestFramePermissions": []
+}

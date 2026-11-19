@@ -1,39 +1,61 @@
 using System.Collections.ObjectModel;
-using System.Text.Json;
-using System.IO;
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
+using Yuandl.ModbusAssistant.Models;
+using Yuandl.ModbusAssistant.Services;
 
 namespace Yuandl.ModbusAssistant.ViewModels.Pages;
 
-public partial class DeviceManagementViewModel : ViewModelBase
+public sealed class DeviceManagementViewModel : ObservableObject
 {
-    public sealed record DeviceProfile(string Name, string Protocol, string Endpoint, byte StationId);
-    [ObservableProperty] private ObservableCollection<DeviceProfile> profiles = [];
-    [ObservableProperty] private string currentProfileName = "默认设备方案";
-    [ObservableProperty] private string newProfileName = "新设备";
-    [ObservableProperty] private string newProtocol = "Modbus TCP";
-    [ObservableProperty] private string newEndpoint = "127.0.0.1:502";
-    [ObservableProperty] private byte newStationId = 1;
-    [ObservableProperty] private string statusText = "就绪";
-    private string ProfilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Yuandl.ModbusAssistant", "devices.json");
+    private readonly PersistenceService _persistence;
 
-    public DeviceManagementViewModel() { Title = "设备管理"; Load(); }
-
-    [RelayCommand] public void AddProfile() { Profiles.Add(new DeviceProfile(NewProfileName, NewProtocol, NewEndpoint, NewStationId)); Save(); StatusText = "设备配置已添加"; }
-    [RelayCommand] public void RemoveProfile(DeviceProfile? profile) { if (profile != null) Profiles.Remove(profile); Save(); }
-    [RelayCommand] public void SaveProfiles() { Save(); StatusText = $"已保存 {Profiles.Count} 个设备配置"; }
-    [RelayCommand] public void LoadProfiles() { Load(); StatusText = $"已加载 {Profiles.Count} 个设备配置"; }
-
-    private void Save()
+    public DeviceManagementViewModel(PersistenceService persistence)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ProfilePath)!);
-        File.WriteAllText(ProfilePath, JsonSerializer.Serialize(Profiles, new JsonSerializerOptions { WriteIndented = true }));
+        _persistence = persistence;
+        foreach (var profile in _persistence.LoadProfiles())
+            Profiles.Add(profile);
+
+        AddProfileCommand = new RelayCommand(AddProfile);
+        DeleteProfileCommand = new RelayCommand(p =>
+        {
+            if (p is DeviceProfile profile)
+            {
+                Profiles.Remove(profile);
+                _persistence.SaveProfiles(Profiles);
+            }
+        });
     }
 
-    private void Load()
+    public ObservableCollection<DeviceProfile> Profiles { get; } = new();
+    public IReadOnlyList<string> Protocols { get; } = new[] { "Modbus TCP", "Modbus RTU", "Modbus ASCII", "TCP Server", "UDP" };
+
+    private string _name = string.Empty;
+    public string Name { get => _name; set => SetProperty(ref _name, value); }
+
+    private string _protocol = "Modbus TCP";
+    public string Protocol { get => _protocol; set => SetProperty(ref _protocol, value); }
+
+    private string _endpoint = "127.0.0.1:5020";
+    public string Endpoint { get => _endpoint; set => SetProperty(ref _endpoint, value); }
+
+    private int _stationId = 1;
+    public int StationId { get => _stationId; set => SetProperty(ref _stationId, value); }
+
+    public RelayCommand AddProfileCommand { get; }
+    public RelayCommand DeleteProfileCommand { get; }
+
+    private void AddProfile()
     {
-        try { Profiles.Clear(); if (File.Exists(ProfilePath)) foreach (var profile in JsonSerializer.Deserialize<List<DeviceProfile>>(File.ReadAllText(ProfilePath)) ?? []) Profiles.Add(profile); }
-        catch (Exception ex) { StatusText = $"加载失败：{ex.Message}"; }
+        if (string.IsNullOrWhiteSpace(Name) || string.IsNullOrWhiteSpace(Endpoint))
+            return;
+
+        Profiles.Add(new DeviceProfile
+        {
+            Name = Name.Trim(),
+            Protocol = Protocol,
+            Endpoint = Endpoint.Trim(),
+            StationId = Math.Clamp(StationId, 1, 247)
+        });
+        _persistence.SaveProfiles(Profiles);
+        Name = string.Empty;
     }
 }

@@ -1,172 +1,230 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Yuandl.ModbusAssistant.Communication;
-using Yuandl.ModbusAssistant.Communication.Abstractions;
-using Yuandl.ModbusAssistant.Communication.Events;
 using Yuandl.ModbusAssistant.Core.Enums;
-using Yuandl.ModbusAssistant.Models.Connection;
+using Yuandl.ModbusAssistant.Core.Utils;
+using Yuandl.ModbusAssistant.Models;
+using Yuandl.ModbusAssistant.Protocol.Modbus;
 
 namespace Yuandl.ModbusAssistant.Services;
 
-/// <summary>
-/// 全局通讯管理服务实现
-/// 负责通道创建、状态转发、异常通知与生命周期控制
-/// </summary>
-public class CommunicationService : ICommunicationService
+public sealed class CommunicationService : IDisposable
 {
-    private readonly IChannelFactory _channelFactory;
-    private readonly SemaphoreSlim _channelLock = new(1, 1);
+    private readonly SemaphoreSlim _exchangeLock = new(1, 1);
     private IChannel? _activeChannel;
-    private readonly ChannelStatistics _aggregateStatistics = new();
 
-    public IChannel? ActiveChannel => _activeChannel;
-    public bool IsConnected => _activeChannel?.State == ChannelState.Connected;
-    public ChannelState CurrentState => _activeChannel?.State ?? ChannelState.Disconnected;
-    public CommunicationType? CurrentType => _activeChannel?.Type;
-    public string CurrentChannelInfo => _activeChannel?.ChannelInfo ?? "无活动连接";
-    public ChannelStatistics Statistics => _activeChannel?.Statistics ?? _aggregateStatistics;
+    public ChannelState State => _activeChannel?.State ?? ChannelState.Disconnected;
+    public CommunicationType? ActiveType => _activeChannel?.Type;
+    public ChannelStatistics Statistics => _activeChannel?.Statistics ?? new ChannelStatistics();
 
-    public event EventHandler<DataReceivedEventArgs>? DataReceived;
-    public event EventHandler<ChannelStateChangedEventArgs>? StateChanged;
-    public event EventHandler<Exception>? ErrorOccurred;
+    public IReadOnlyList<TcpServerClientSession> ConnectedClients =>
+        _activeChannel is TcpServerChannel tcpServer ? tcpServer.GetClients() : Array.Empty<TcpServerClientSession>();
 
-    public CommunicationService(IChannelFactory channelFactory)
+    public event EventHandler<ChannelState>? StateChanged;
+    public event EventHandler<ChannelDataReceivedEventArgs>? DataReceived;
+    public event EventHandler<TrafficEventArgs>? TrafficCaptured;
+    public event EventHandler<IReadOnlyList<TcpServerClientSession>>? ClientsChanged;
+    public event EventHandler<string>? ErrorOccurred;
+
+    public async Task ConnectSerialAsync(SerialPortParameters parameters)
     {
-        _channelFactory = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
+        await DisconnectAsync();
+        await OpenChannelAsync(new SerialPortChannel(parameters));
     }
 
-    public async Task<bool> ConnectSerialAsync(SerialPortParameters parameters, CancellationToken cancellationToken = default)
+    public async Task ConnectTcpClientAsync(TcpClientParameters parameters)
     {
-        var channel = _channelFactory.CreateSerialChannel(parameters);
-        return await SwitchChannelAsync(channel, cancellationToken).ConfigureAwait(false);
+        await DisconnectAsync();
+        await OpenChannelAsync(new TcpClientChannel(parameters));
     }
 
-    public async Task<bool> ConnectTcpAsync(TcpClientParameters parameters, CancellationToken cancellationToken = default)
+    public async Task ConnectUdpAsync(UdpParameters parameters)
     {
-        var channel = _channelFactory.CreateTcpClientChannel(parameters);
-        return await SwitchChannelAsync(channel, cancellationToken).ConfigureAwait(false);
+        await DisconnectAsync();
+        await OpenChannelAsync(new UdpChannel(parameters));
     }
 
-    public async Task<bool> ConnectUdpAsync(UdpParameters parameters, CancellationToken cancellationToken = default)
+    public async Task StartTcpServerAsync(TcpServerParameters parameters)
     {
-        var channel = _channelFactory.CreateUdpChannel(parameters);
-        return await SwitchChannelAsync(channel, cancellationToken).ConfigureAwait(false);
+        await DisconnectAsync();
+        await OpenChannelAsync(new TcpServerChannel(parameters));
+    }
+
+    private async Task OpenChannelAsync(IChannel channel)
+    {
+        channel.StateChanged += OnChannelStateChanged;
+        channel.DataReceived += OnChannelDataReceived;
+        channel.ErrorOccurred += OnChannelErrorOccurred;
+        if (channel is TcpServerChannel srv)
+            srv.ClientsChanged += OnServerClientsChanged;
+
+        _activeChannel = channel;
+        try
+        {
+            await channel.OpenAsync();
+        }
+        catch
+        {
+            await DisconnectAsync();
+            throw;
+        }
     }
 
     public async Task DisconnectAsync()
     {
-        await _channelLock.WaitAsync().ConfigureAwait(false);
+        var ch = _activeChannel;
+        _activeChannel = null;
+        if (ch != null)
+        {
+            ch.StateChanged -= OnChannelStateChanged;
+            ch.DataReceived -= OnChannelDataReceived;
+            ch.ErrorOccurred -= OnChannelErrorOccurred;
+            if (ch is TcpServerChannel srv)
+                srv.ClientsChanged -= OnServerClientsChanged;
+
+            await ch.CloseAsync();
+            ch.Dispose();
+        }
+        StateChanged?.Invoke(this, ChannelState.Disconnected);
+        ClientsChanged?.Invoke(this, Array.Empty<TcpServerClientSession>());
+    }
+
+    public async Task SendAsync(byte[] data, string? targetSessionId = null, CancellationToken cancellationToken = default)
+    {
+        if (_activeChannel == null || _activeChannel.State != ChannelState.Connected)
+            throw new InvalidOperationException("当前无活跃连接通道");
+
+        await _activeChannel.SendAsync(data, targetSessionId, cancellationToken);
+        TrafficCaptured?.Invoke(this, new TrafficEventArgs
+        {
+            Direction = "TX",
+            Bytes = data,
+            Hex = ByteUtils.BytesToHex(data),
+            Timestamp = DateTime.Now,
+            ChannelType = _activeChannel.Type,
+            SessionId = targetSessionId,
+            SessionLabel = targetSessionId != null ? $"-> {targetSessionId}" : null
+        });
+    }
+
+    public void DisconnectServerClient(string sessionId)
+    {
+        if (_activeChannel is TcpServerChannel srv)
+            srv.DisconnectClient(sessionId);
+    }
+
+    public async Task<byte[]> ExchangeModbusAsync(
+        byte[] request,
+        ModbusTransport transport,
+        int timeoutMs = 1000,
+        int retries = 2,
+        CancellationToken cancellationToken = default)
+    {
+        if (_activeChannel == null || _activeChannel.State != ChannelState.Connected)
+            throw new InvalidOperationException("请先在通讯连接页建立连接");
+
+        await _exchangeLock.WaitAsync(cancellationToken);
         try
         {
-            if (_activeChannel != null)
+            Exception? lastException = null;
+            int maxAttempts = Math.Max(1, retries + 1);
+
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
-                UnsubscribeEvents(_activeChannel);
-                await _activeChannel.CloseAsync().ConfigureAwait(false);
-                await _activeChannel.DisposeAsync().ConfigureAwait(false);
-                _activeChannel = null;
-                StateChanged?.Invoke(this, new ChannelStateChangedEventArgs(ChannelState.Connected, ChannelState.Disconnected, "已断开连接"));
+                var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var accumulator = new List<byte>();
+
+                void Handler(object? _, ChannelDataReceivedEventArgs e)
+                {
+                    lock (accumulator)
+                    {
+                        accumulator.AddRange(e.Bytes);
+                        var snapshot = accumulator.ToArray();
+                        if (IsCompleteModbusFrame(snapshot, transport))
+                        {
+                            tcs.TrySetResult(snapshot);
+                        }
+                    }
+                }
+
+                _activeChannel.DataReceived += Handler;
+                try
+                {
+                    await SendAsync(request, null, cancellationToken);
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeoutCts.CancelAfter(Math.Clamp(timeoutMs, 100, 30000));
+                    using var reg = timeoutCts.Token.Register(() => tcs.TrySetException(new TimeoutException("Modbus 响应超时")));
+
+                    return await tcs.Task;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    lastException = ex;
+                }
+                finally
+                {
+                    _activeChannel.DataReceived -= Handler;
+                }
             }
+
+            throw lastException ?? new TimeoutException("Modbus 请求未收到响应");
         }
         finally
         {
-            _channelLock.Release();
+            _exchangeLock.Release();
         }
     }
 
-    public async Task<int> SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    private static bool IsCompleteModbusFrame(byte[] buffer, ModbusTransport transport)
     {
-        var channel = _activeChannel;
-        if (channel == null || channel.State != ChannelState.Connected)
+        if (buffer.Length == 0) return false;
+
+        if (transport == ModbusTransport.Tcp)
         {
-            throw new InvalidOperationException("通讯链路未就绪或已断开，无法发送数据");
+            if (buffer.Length < 8) return false;
+            int declaredLength = (buffer[4] << 8) | buffer[5];
+            return buffer.Length >= 6 + declaredLength;
         }
 
-        return await channel.SendAsync(data, cancellationToken).ConfigureAwait(false);
-    }
+        if (transport == ModbusTransport.Ascii)
+        {
+            return buffer.Length >= 7 && buffer[0] == (byte)':' && buffer[^2] == (byte)'\r' && buffer[^1] == (byte)'\n';
+        }
 
-    public void ResetStatistics()
-    {
-        _activeChannel?.Statistics.Reset();
-        _aggregateStatistics.Reset();
-    }
-
-    private async Task<bool> SwitchChannelAsync(IChannel newChannel, CancellationToken cancellationToken)
-    {
-        await _channelLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_activeChannel != null)
-            {
-                UnsubscribeEvents(_activeChannel);
-                await _activeChannel.CloseAsync().ConfigureAwait(false);
-                await _activeChannel.DisposeAsync().ConfigureAwait(false);
-                _activeChannel = null;
-            }
-
-            SubscribeEvents(newChannel);
-            _activeChannel = newChannel;
-
-            bool opened = await newChannel.OpenAsync(cancellationToken).ConfigureAwait(false);
-            return opened;
+            _ = ModbusFrame.ParseResponse(buffer, ModbusTransport.Rtu);
+            return true;
         }
-        catch (Exception ex)
+        catch
         {
-            if (_activeChannel != null)
-            {
-                UnsubscribeEvents(_activeChannel);
-                await _activeChannel.DisposeAsync().ConfigureAwait(false);
-                _activeChannel = null;
-            }
-            ErrorOccurred?.Invoke(this, ex);
-            throw;
-        }
-        finally
-        {
-            _channelLock.Release();
+            return false;
         }
     }
 
-    private void SubscribeEvents(IChannel channel)
-    {
-        channel.DataReceived += OnChannelDataReceived;
-        channel.StateChanged += OnChannelStateChanged;
-        channel.ErrorOccurred += OnChannelErrorOccurred;
-    }
+    private void OnChannelStateChanged(object? sender, ChannelState state) => StateChanged?.Invoke(this, state);
 
-    private void UnsubscribeEvents(IChannel channel)
-    {
-        channel.DataReceived -= OnChannelDataReceived;
-        channel.StateChanged -= OnChannelStateChanged;
-        channel.ErrorOccurred -= OnChannelErrorOccurred;
-    }
-
-    private void OnChannelDataReceived(object? sender, DataReceivedEventArgs e)
+    private void OnChannelDataReceived(object? sender, ChannelDataReceivedEventArgs e)
     {
         DataReceived?.Invoke(this, e);
+        TrafficCaptured?.Invoke(this, new TrafficEventArgs
+        {
+            Direction = "RX",
+            Bytes = e.Bytes,
+            Hex = ByteUtils.BytesToHex(e.Bytes),
+            Timestamp = DateTime.Now,
+            ChannelType = _activeChannel?.Type,
+            SessionId = e.SessionId,
+            SessionLabel = e.SessionLabel
+        });
     }
 
-    private void OnChannelStateChanged(object? sender, ChannelStateChangedEventArgs e)
-    {
-        StateChanged?.Invoke(this, e);
-    }
+    private void OnServerClientsChanged(object? sender, IReadOnlyList<TcpServerClientSession> clients) =>
+        ClientsChanged?.Invoke(this, clients);
 
-    private void OnChannelErrorOccurred(object? sender, Exception e)
-    {
-        ErrorOccurred?.Invoke(this, e);
-    }
+    private void OnChannelErrorOccurred(object? sender, string message) => ErrorOccurred?.Invoke(this, message);
 
     public void Dispose()
     {
         _ = DisconnectAsync();
-        _channelLock.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await DisconnectAsync().ConfigureAwait(false);
-        _channelLock.Dispose();
-        GC.SuppressFinalize(this);
+        _exchangeLock.Dispose();
     }
 }

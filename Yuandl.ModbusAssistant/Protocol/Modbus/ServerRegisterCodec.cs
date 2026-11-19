@@ -1,111 +1,146 @@
 using System.Buffers.Binary;
 using System.Globalization;
-using Yuandl.ModbusAssistant.Models.Connection;
+using Yuandl.ModbusAssistant.Core.Enums;
+using Yuandl.ModbusAssistant.Models;
 
 namespace Yuandl.ModbusAssistant.Protocol.Modbus;
 
 public static class ServerRegisterCodec
 {
-    public static ushort[] EncodeRegisters(string value, ServerRegisterDataType type, ServerRegisterByteOrder byteOrder)
-    {
-        var width = GetWidth(type);
-        var bytes = new byte[width * 2];
-        switch (type)
-        {
-            case ServerRegisterDataType.Int16:
-                BinaryPrimitives.WriteInt16BigEndian(bytes, short.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture));
-                break;
-            case ServerRegisterDataType.UInt16:
-                BinaryPrimitives.WriteUInt16BigEndian(bytes, ushort.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture));
-                break;
-            case ServerRegisterDataType.Int32:
-                BinaryPrimitives.WriteInt32BigEndian(bytes, int.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture));
-                break;
-            case ServerRegisterDataType.UInt32:
-                BinaryPrimitives.WriteUInt32BigEndian(bytes, uint.Parse(value, NumberStyles.Integer, CultureInfo.InvariantCulture));
-                break;
-            case ServerRegisterDataType.Float:
-                BinaryPrimitives.WriteInt32BigEndian(bytes, BitConverter.SingleToInt32Bits(float.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture)));
-                break;
-            case ServerRegisterDataType.Double:
-                BinaryPrimitives.WriteInt64BigEndian(bytes, BitConverter.DoubleToInt64Bits(double.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture)));
-                break;
-            default:
-                throw new ArgumentException($"数据类型 {type} 不是寄存器数值类型", nameof(type));
-        }
-
-        if (byteOrder == ServerRegisterByteOrder.LittleEndian)
-        {
-            Array.Reverse(bytes);
-        }
-
-        var registers = new ushort[width];
-        for (var index = 0; index < width; index++)
-        {
-            registers[index] = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(index * 2, 2));
-        }
-
-        return registers;
-    }
-
-    public static bool EncodeBit(string value)
-    {
-        if (!bool.TryParse(value, out var bit))
-        {
-            throw new FormatException("线圈/离散输入的值必须为 true 或 false");
-        }
-
-        return bit;
-    }
-
     public static int GetWidth(ServerRegisterDataType type) => type switch
     {
         ServerRegisterDataType.Bit or ServerRegisterDataType.Int16 or ServerRegisterDataType.UInt16 => 1,
         ServerRegisterDataType.Int32 or ServerRegisterDataType.UInt32 or ServerRegisterDataType.Float => 2,
         ServerRegisterDataType.Double => 4,
-        _ => throw new ArgumentOutOfRangeException(nameof(type))
+        _ => throw new ArgumentOutOfRangeException(nameof(type), $"未知数据类型: {type}")
     };
+
+    public static ushort[] EncodeRegisters(
+        string value,
+        ServerRegisterDataType type,
+        ServerRegisterByteOrder byteOrder)
+    {
+        int width = GetWidth(type);
+        var bytes = new byte[width * 2];
+
+        switch (type)
+        {
+            case ServerRegisterDataType.Int16:
+                if (!short.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out short i16))
+                    throw new FormatException($"Int16 值 \"{value}\" 无效 [-32768, 32767]");
+                BinaryPrimitives.WriteInt16BigEndian(bytes, i16);
+                break;
+
+            case ServerRegisterDataType.UInt16:
+                if (!ushort.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out ushort u16))
+                    throw new FormatException($"UInt16 值 \"{value}\" 无效 [0, 65535]");
+                BinaryPrimitives.WriteUInt16BigEndian(bytes, u16);
+                break;
+
+            case ServerRegisterDataType.Int32:
+                if (!int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int i32))
+                    throw new FormatException($"Int32 值 \"{value}\" 无效");
+                BinaryPrimitives.WriteInt32BigEndian(bytes, i32);
+                break;
+
+            case ServerRegisterDataType.UInt32:
+                if (!uint.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out uint u32))
+                    throw new FormatException($"UInt32 值 \"{value}\" 无效");
+                BinaryPrimitives.WriteUInt32BigEndian(bytes, u32);
+                break;
+
+            case ServerRegisterDataType.Float:
+                if (!float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float f32) || !float.IsFinite(f32))
+                    throw new FormatException($"Float 值 \"{value}\" 无效");
+                BinaryPrimitives.WriteSingleBigEndian(bytes, f32);
+                break;
+
+            case ServerRegisterDataType.Double:
+                if (!double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double f64) || !double.IsFinite(f64))
+                    throw new FormatException($"Double 值 \"{value}\" 无效");
+                BinaryPrimitives.WriteDoubleBigEndian(bytes, f64);
+                break;
+
+            default:
+                throw new InvalidOperationException($"数据类型 {type} 不是寄存器数值类型");
+        }
+
+        if (byteOrder == ServerRegisterByteOrder.LittleEndian)
+            Array.Reverse(bytes);
+
+        var registers = new ushort[width];
+        for (int i = 0; i < width; i++)
+            registers[i] = BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(i * 2, 2));
+
+        return registers;
+    }
+
+    public static string DecodeRegisters(
+        IReadOnlyList<ushort> registers,
+        ServerRegisterDataType type,
+        ServerRegisterByteOrder byteOrder)
+    {
+        int width = GetWidth(type);
+        var bytes = new byte[width * 2];
+        for (int i = 0; i < width; i++)
+        {
+            ushort reg = i < registers.Count ? registers[i] : (ushort)0;
+            BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(i * 2, 2), reg);
+        }
+
+        if (byteOrder == ServerRegisterByteOrder.LittleEndian)
+            Array.Reverse(bytes);
+
+        return type switch
+        {
+            ServerRegisterDataType.Int16 => BinaryPrimitives.ReadInt16BigEndian(bytes).ToString(CultureInfo.InvariantCulture),
+            ServerRegisterDataType.UInt16 => BinaryPrimitives.ReadUInt16BigEndian(bytes).ToString(CultureInfo.InvariantCulture),
+            ServerRegisterDataType.Int32 => BinaryPrimitives.ReadInt32BigEndian(bytes).ToString(CultureInfo.InvariantCulture),
+            ServerRegisterDataType.UInt32 => BinaryPrimitives.ReadUInt32BigEndian(bytes).ToString(CultureInfo.InvariantCulture),
+            ServerRegisterDataType.Float => Math.Round(BinaryPrimitives.ReadSingleBigEndian(bytes), 6).ToString(CultureInfo.InvariantCulture),
+            ServerRegisterDataType.Double => Math.Round(BinaryPrimitives.ReadDoubleBigEndian(bytes), 10).ToString(CultureInfo.InvariantCulture),
+            _ => (registers.Count > 0 ? registers[0] : 0).ToString(CultureInfo.InvariantCulture)
+        };
+    }
+
+    public static bool EncodeBit(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized is "true" or "1") return true;
+        if (normalized is "false" or "0") return false;
+        throw new FormatException("线圈/离散输入的值必须为 true/false 或 1/0");
+    }
 
     public static void Validate(ServerRegisterDefinition definition)
     {
-        ArgumentNullException.ThrowIfNull(definition);
-        if (!Enum.IsDefined(definition.Area)) throw new ArgumentOutOfRangeException(nameof(definition), "未知寄存器区域");
-        if (!Enum.IsDefined(definition.DataType)) throw new ArgumentOutOfRangeException(nameof(definition), "未知数据类型");
-        if (!Enum.IsDefined(definition.ByteOrder)) throw new ArgumentOutOfRangeException(nameof(definition), "未知字节序");
-        var bitArea = definition.Area is ServerRegisterArea.Coil or ServerRegisterArea.DiscreteInput;
-        if (bitArea != (definition.DataType == ServerRegisterDataType.Bit))
-        {
-            throw new ArgumentException("线圈和离散输入必须使用 Bit 类型；寄存器区必须使用数值类型", nameof(definition));
-        }
+        if (definition.Address is < 0 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(definition), "起始地址必须在 0 至 65535 之间");
 
-        if (definition.Address + definition.Width > ushort.MaxValue + 1)
-        {
+        bool bitArea = definition.Area is ServerRegisterArea.Coil or ServerRegisterArea.DiscreteInput;
+        if (bitArea != (definition.DataType == ServerRegisterDataType.Bit))
+            throw new InvalidOperationException("线圈和离散输入必须使用 Bit 类型；寄存器区必须使用数值类型");
+
+        int width = GetWidth(definition.DataType);
+        if (definition.Address + width > 65536)
             throw new ArgumentOutOfRangeException(nameof(definition), "寄存器定义超出 Modbus 地址范围");
-        }
 
         if (bitArea)
-        {
             _ = EncodeBit(definition.InitialValue);
-        }
         else
-        {
             _ = EncodeRegisters(definition.InitialValue, definition.DataType, definition.ByteOrder);
-        }
     }
 
     public static void ValidateNoOverlap(IEnumerable<ServerRegisterDefinition> definitions)
     {
-        ArgumentNullException.ThrowIfNull(definitions);
-        foreach (var group in definitions.GroupBy(definition => definition.Area))
+        foreach (var group in definitions.GroupBy(d => d.Area))
         {
-            var ordered = group.OrderBy(definition => definition.Address).ToArray();
-            for (var index = 1; index < ordered.Length; index++)
+            var ordered = group.OrderBy(d => d.Address).ToList();
+            for (int i = 1; i < ordered.Count; i++)
             {
-                var previousEnd = ordered[index - 1].Address + ordered[index - 1].Width;
-                if (ordered[index].Address < previousEnd)
-                {
-                    throw new ArgumentException($"{group.Key} 地址 {ordered[index].Address} 与地址 {ordered[index - 1].Address} 的定义重叠");
-                }
+                var prev = ordered[i - 1];
+                int prevEnd = prev.Address + GetWidth(prev.DataType);
+                if (ordered[i].Address < prevEnd)
+                    throw new InvalidOperationException($"{group.Key} 地址 {ordered[i].Address} 与地址 {prev.Address} 的定义重叠");
             }
         }
     }

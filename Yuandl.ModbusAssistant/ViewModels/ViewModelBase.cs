@@ -1,15 +1,87 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Windows.Input;
 
 namespace Yuandl.ModbusAssistant.ViewModels;
 
-/// <summary>
-/// 基础 ViewModel，继承自 ObservableObject，提供属性通知与基础能力
-/// </summary>
-public abstract partial class ViewModelBase : ObservableObject
+public abstract class ObservableObject : INotifyPropertyChanged
 {
-    [ObservableProperty]
-    private string title = string.Empty;
+    public event PropertyChangedEventHandler? PropertyChanged;
 
-    [ObservableProperty]
-    private bool isBusy;
+    protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+            return false;
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+public sealed class RelayCommand : ICommand
+{
+    private readonly Action<object?> _execute;
+    private readonly Predicate<object?>? _canExecute;
+
+    public RelayCommand(Action execute, Func<bool>? canExecute = null)
+        : this(_ => execute(), canExecute is null ? null : _ => canExecute())
+    {
+    }
+
+    public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null)
+    {
+        _execute = execute;
+        _canExecute = canExecute;
+    }
+
+    public event EventHandler? CanExecuteChanged;
+
+    public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
+
+    public void Execute(object? parameter) => _execute(parameter);
+
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+}
+
+public sealed class AsyncRelayCommand : ICommand
+{
+    private readonly Func<object?, Task> _execute;
+    private readonly Predicate<object?>? _canExecute;
+    private bool _isExecuting;
+
+    public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null)
+        : this(_ => execute(), canExecute is null ? null : _ => canExecute())
+    {
+    }
+
+    public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null)
+    {
+        _execute = execute;
+        _canExecute = canExecute;
+    }
+
+    public event EventHandler? CanExecuteChanged;
+
+    public bool CanExecute(object? parameter) => !_isExecuting && (_canExecute?.Invoke(parameter) ?? true);
+
+    public async void Execute(object? parameter)
+    {
+        if (!CanExecute(parameter)) return;
+        _isExecuting = true;
+        RaiseCanExecuteChanged();
+        try
+        {
+            await _execute(parameter);
+        }
+        finally
+        {
+            _isExecuting = false;
+            RaiseCanExecuteChanged();
+        }
+    }
+
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }

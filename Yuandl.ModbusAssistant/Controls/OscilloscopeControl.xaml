@@ -1,0 +1,10 @@
+<UserControl x:Class="Yuandl.ModbusAssistant.Controls.OscilloscopeControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Yuandl.ModbusAssistant.Controls"
+             Background="#060A10"
+             ClipToBounds="True">
+    <Grid>
+        <controls:OscilloscopeSurface x:Name="Surface" />
+    </Grid>
+</UserControl>

@@ -1,36 +1,19 @@
-using System;
-
 namespace Yuandl.ModbusAssistant.Core.Utils;
 
-/// <summary>
-/// Modbus ASCII 纵向冗余校验 (LRC, Longitudinal Redundancy Check)
-/// 算法：对报文中冒号之后、回车之前的所有字节累加取模，并取二进制补码
-/// </summary>
 public static class LrcUtils
 {
-    public static byte Compute(ReadOnlySpan<byte> buffer)
+    public static byte Compute(ReadOnlySpan<byte> data)
     {
-        byte sum = 0;
-        foreach (byte b in buffer)
-        {
-            sum += b;
-        }
-        return (byte)(-sum);
+        int sum = 0;
+        for (int i = 0; i < data.Length; i++)
+            sum += data[i];
+        return (byte)((-sum) & 0xFF);
     }
 
-    public static bool Verify(ReadOnlySpan<byte> bufferWithLrc)
+    public static bool Verify(ReadOnlySpan<byte> frameWithoutColonsAndCrLf)
     {
-        if (bufferWithLrc.IsEmpty)
-        {
-            return false;
-        }
-
-        byte sum = 0;
-        foreach (byte b in bufferWithLrc)
-        {
-            sum += b;
-        }
-
-        return sum == 0;
+        if (frameWithoutColonsAndCrLf.Length < 2) return false;
+        var expected = Compute(frameWithoutColonsAndCrLf[..^1]);
+        return expected == frameWithoutColonsAndCrLf[^1];
     }
 }

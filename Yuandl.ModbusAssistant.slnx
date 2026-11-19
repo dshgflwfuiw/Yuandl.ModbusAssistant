@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/tests/">
-    <Project Path="tests/Yuandl.ModbusAssistant.Tests/Yuandl.ModbusAssistant.Tests.csproj" />
-  </Folder>
-  <Project Path="Yuandl.ModbusAssistant/Yuandl.ModbusAssistant.csproj" />
-</Solution>
