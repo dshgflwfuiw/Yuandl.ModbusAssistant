@@ -19,7 +19,7 @@ export type ModbusTransport = 'Rtu' | 'Ascii' | 'Tcp';
 
 export type RegisterDataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'UInt32' | 'Float' | 'Double';
 
-export type RegisterByteOrder = 'BigEndian' | 'LittleEndian';
+export type RegisterByteOrder = 'BigEndian' | 'LittleEndian' | 'WordSwap' | 'ByteSwap';
 
 export type ServerRegisterArea =
   | 'HoldingRegister'
@@ -36,7 +36,7 @@ export type ServerRegisterDataType =
   | 'Float'
   | 'Double';
 
-export type ServerRegisterByteOrder = 'BigEndian' | 'LittleEndian';
+export type ServerRegisterByteOrder = 'BigEndian' | 'LittleEndian' | 'WordSwap' | 'ByteSwap';
 
 export interface SerialPortParameters {
   portName: string;

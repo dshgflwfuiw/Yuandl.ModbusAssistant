@@ -25,18 +25,14 @@ public static class RegisterValueConverter
         if (registers.Count < width)
             throw new ArgumentException($"{type} 至少需要 {width} 个寄存器", nameof(registers));
 
-        var bytes = new byte[registers.Count * 2];
-        for (int i = 0; i < registers.Count; i++)
+        var bytes = new byte[width * 2];
+        for (int i = 0; i < width; i++)
         {
             bytes[i * 2] = (byte)(registers[i] >> 8);
             bytes[i * 2 + 1] = (byte)(registers[i] & 0xFF);
         }
 
-        if (order == RegisterByteOrder.LittleEndian)
-        {
-            for (int i = 0; i + 1 < bytes.Length; i += 2)
-                (bytes[i], bytes[i + 1]) = (bytes[i + 1], bytes[i]);
-        }
+        ApplyByteOrder(bytes, order);
 
         double rawValue = type switch
         {
@@ -52,5 +48,26 @@ public static class RegisterValueConverter
 
         double scaled = rawValue * scale;
         return double.IsFinite(scaled) ? Math.Round(scaled, 10) : scaled;
+    }
+
+    private static void ApplyByteOrder(byte[] bytes, RegisterByteOrder order)
+    {
+        switch (order)
+        {
+            case RegisterByteOrder.LittleEndian:
+                Array.Reverse(bytes);
+                break;
+            case RegisterByteOrder.WordSwap:
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    (bytes[i], bytes[i + 2]) = (bytes[i + 2], bytes[i]);
+                    (bytes[i + 1], bytes[i + 3]) = (bytes[i + 3], bytes[i + 1]);
+                }
+                break;
+            case RegisterByteOrder.ByteSwap:
+                for (int i = 0; i + 1 < bytes.Length; i += 2)
+                    (bytes[i], bytes[i + 1]) = (bytes[i + 1], bytes[i]);
+                break;
+        }
     }
 }

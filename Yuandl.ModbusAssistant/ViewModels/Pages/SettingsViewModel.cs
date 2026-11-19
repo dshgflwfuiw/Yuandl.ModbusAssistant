@@ -12,8 +12,8 @@ public sealed class SettingsViewModel : ObservableObject
         _persistence = persistence;
         var saved = _persistence.LoadSettings();
         _isDarkTheme = saved.IsDarkTheme;
-        _defaultTimeoutMs = saved.DefaultTimeoutMs;
-        _defaultRetryTimes = saved.DefaultRetryTimes;
+        _defaultTimeoutMs = Math.Clamp(saved.DefaultTimeoutMs, 100, 30000);
+        _defaultRetryTimes = Math.Clamp(saved.DefaultRetryTimes, 0, 10);
 
         SaveCommand = new RelayCommand(SaveSettings);
     }
@@ -52,13 +52,22 @@ public sealed class SettingsViewModel : ObservableObject
         get => _defaultTimeoutMs;
         set
         {
-            if (SetProperty(ref _defaultTimeoutMs, value))
+            int validated = Math.Clamp(value, 100, 30000);
+            if (SetProperty(ref _defaultTimeoutMs, validated))
                 SaveSettings();
         }
     }
 
     private int _defaultRetryTimes = 2;
-    public int DefaultRetryTimes { get => _defaultRetryTimes; set => SetProperty(ref _defaultRetryTimes, value); }
+    public int DefaultRetryTimes
+    {
+        get => _defaultRetryTimes;
+        set
+        {
+            if (SetProperty(ref _defaultRetryTimes, Math.Clamp(value, 0, 10)))
+                SaveSettings();
+        }
+    }
 
     private string _saveBanner = string.Empty;
     public string SaveBanner { get => _saveBanner; private set => SetProperty(ref _saveBanner, value); }

@@ -22,7 +22,7 @@ const VALID_TYPES: ServerRegisterDataType[] = [
   'Double',
 ];
 
-const VALID_ORDERS: ServerRegisterByteOrder[] = ['BigEndian', 'LittleEndian'];
+const VALID_ORDERS: ServerRegisterByteOrder[] = ['BigEndian', 'LittleEndian', 'WordSwap', 'ByteSwap'];
 
 function parseStrictInt(value: string, min: number, max: number, label: string): number {
   const trimmed = value.trim();
@@ -98,9 +98,7 @@ export const ServerRegisterCodec = {
         throw new Error(`数据类型 ${type} 不是寄存器数值类型`);
     }
 
-    if (byteOrder === 'LittleEndian') {
-      bytes.reverse();
-    }
+    applyByteOrder(bytes, byteOrder);
 
     const registers: number[] = new Array(width);
     for (let i = 0; i < width; i++) {
@@ -120,9 +118,7 @@ export const ServerRegisterCodec = {
     for (let i = 0; i < width; i++) {
       view.setUint16(i * 2, (registers[i] ?? 0) & 0xffff, false);
     }
-    if (byteOrder === 'LittleEndian') {
-      bytes.reverse();
-    }
+    applyByteOrder(bytes, byteOrder);
 
     switch (type) {
       case 'Int16':
@@ -202,3 +198,18 @@ export const ServerRegisterCodec = {
     }
   },
 };
+
+function applyByteOrder(bytes: Uint8Array, order: ServerRegisterByteOrder): void {
+  if (order === 'LittleEndian') {
+    bytes.reverse();
+  } else if (order === 'WordSwap') {
+    for (let i = 0; i + 3 < bytes.length; i += 4) {
+      [bytes[i], bytes[i + 2]] = [bytes[i + 2], bytes[i]];
+      [bytes[i + 1], bytes[i + 3]] = [bytes[i + 3], bytes[i + 1]];
+    }
+  } else if (order === 'ByteSwap') {
+    for (let i = 0; i + 1 < bytes.length; i += 2) {
+      [bytes[i], bytes[i + 1]] = [bytes[i + 1], bytes[i]];
+    }
+  }
+}

@@ -53,7 +53,9 @@ public enum RegisterDataType
 public enum RegisterByteOrder
 {
     BigEndian,
-    LittleEndian
+    LittleEndian,
+    WordSwap,
+    ByteSwap
 }
 
 public enum ServerRegisterArea
@@ -78,7 +80,9 @@ public enum ServerRegisterDataType
 public enum ServerRegisterByteOrder
 {
     BigEndian,
-    LittleEndian
+    LittleEndian,
+    WordSwap,
+    ByteSwap
 }
 
 public enum ModbusServerTransportMode

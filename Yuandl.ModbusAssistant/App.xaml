@@ -133,6 +133,9 @@
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="LocalizedComboBoxStyle" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
                 <Setter Property="ItemTemplate">
                     <Setter.Value>
                         <DataTemplate>

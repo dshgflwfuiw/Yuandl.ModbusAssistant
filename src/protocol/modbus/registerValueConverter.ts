@@ -22,19 +22,13 @@ export const RegisterValueConverter = {
       throw new Error(`${type} 至少需要 ${width} 个寄存器`);
     }
 
-    const bytes = new Uint8Array(registers.length * 2);
-    for (let i = 0; i < registers.length; i++) {
+    const bytes = new Uint8Array(width * 2);
+    for (let i = 0; i < width; i++) {
       bytes[i * 2] = (registers[i] >>> 8) & 0xff;
       bytes[i * 2 + 1] = registers[i] & 0xff;
     }
 
-    if (order === 'LittleEndian') {
-      for (let i = 0; i + 1 < bytes.length; i += 2) {
-        const tmp = bytes[i];
-        bytes[i] = bytes[i + 1];
-        bytes[i + 1] = tmp;
-      }
-    }
+    applyByteOrder(bytes, order);
 
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let rawValue: number;
@@ -69,3 +63,18 @@ export const RegisterValueConverter = {
     return Number.isFinite(scaled) ? Number(scaled.toPrecision(12)) : scaled;
   },
 };
+
+function applyByteOrder(bytes: Uint8Array, order: RegisterByteOrder): void {
+  if (order === 'LittleEndian') {
+    bytes.reverse();
+  } else if (order === 'WordSwap') {
+    for (let i = 0; i + 3 < bytes.length; i += 4) {
+      [bytes[i], bytes[i + 2]] = [bytes[i + 2], bytes[i]];
+      [bytes[i + 1], bytes[i + 3]] = [bytes[i + 3], bytes[i + 1]];
+    }
+  } else if (order === 'ByteSwap') {
+    for (let i = 0; i + 1 < bytes.length; i += 2) {
+      [bytes[i], bytes[i + 1]] = [bytes[i + 1], bytes[i]];
+    }
+  }
+}

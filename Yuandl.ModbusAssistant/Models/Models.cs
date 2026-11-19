@@ -154,6 +154,7 @@ public sealed class RegisterMonitorRow
     public double Value { get; set; }
     public bool IsDigital { get; set; }
     public bool IsEnabledInScope { get; set; } = true;
+    public string ScopeToggleText => IsEnabledInScope ? "显示" : "隐藏";
     public string TraceColorHex { get; set; } = "#22D3EE";
 
     private string _note = string.Empty;

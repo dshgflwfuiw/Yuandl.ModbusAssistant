@@ -24,11 +24,19 @@ public sealed class ModbusDecodedItem
 public sealed class ModbusDebugViewModel : ObservableObject
 {
     private readonly CommunicationService _comm;
+    private readonly SettingsViewModel _settings;
     private ushort _transactionId = 1;
 
-    public ModbusDebugViewModel(CommunicationService comm)
+    public ModbusDebugViewModel(CommunicationService comm, SettingsViewModel settings)
     {
         _comm = comm;
+        _settings = settings;
+        TimeoutMs = settings.DefaultTimeoutMs;
+        settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SettingsViewModel.DefaultTimeoutMs))
+                TimeoutMs = settings.DefaultTimeoutMs;
+        };
 
         Functions = new[]
         {
@@ -193,7 +201,7 @@ public sealed class ModbusDebugViewModel : ObservableObject
             var frame = BuildFrameForTxId(txId);
             RequestPreviewHex = ByteUtils.BytesToHex(frame);
 
-            var respBytes = await _comm.ExchangeModbusAsync(frame, Transport, TimeoutMs, retries: 1);
+            var respBytes = await _comm.ExchangeModbusAsync(frame, Transport, TimeoutMs, _settings.DefaultRetryTimes);
             ResponseHex = ByteUtils.BytesToHex(respBytes);
             DecodeResponseBytes(respBytes);
         }

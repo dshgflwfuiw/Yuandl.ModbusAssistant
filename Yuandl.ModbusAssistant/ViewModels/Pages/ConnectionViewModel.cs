@@ -305,8 +305,7 @@ public sealed class ConnectionViewModel : ObservableObject
 
     public void RefreshLocalIpAddresses()
     {
-        var adapters = new List<string>();
-        var readErrors = new List<string>();
+        var addresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -315,45 +314,28 @@ public sealed class ConnectionViewModel : ObservableObject
             {
                 try
                 {
-                    var addresses = network.GetIPProperties().UnicastAddresses
+                    foreach (var address in network.GetIPProperties().UnicastAddresses
                         .Select(address => address.Address)
                         .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
                         .Distinct()
                         .OrderBy(address => address.ToString(), StringComparer.Ordinal)
-                        .Select(address => $"{address}:{TcpServer.ListenPort}")
-                        .ToArray();
-
-                    if (addresses.Length > 0)
-                    {
-                        string status = network.OperationalStatus switch
-                        {
-                            OperationalStatus.Up => "已连接",
-                            OperationalStatus.Down => "未连接",
-                            OperationalStatus.Dormant => "等待连接",
-                            _ => network.OperationalStatus.ToString()
-                        };
-                        adapters.Add($"{network.Name} · {network.Description}（{status}）：{string.Join(", ", addresses)}");
-                    }
+                        )
+                        addresses.Add($"{address}:{TcpServer.ListenPort}");
                 }
-                catch (NetworkInformationException ex)
+                catch (NetworkInformationException)
                 {
-                    readErrors.Add($"{network.Name}: {ex.Message}");
                 }
             }
         }
         catch (NetworkInformationException ex)
         {
-            LocalIpAddressesText = $"读取网卡信息失败：{ex.Message}";
+            LocalIpAddressesText = $"读取失败：{ex.Message}";
             return;
         }
 
-        var result = adapters.Count > 0
-            ? string.Join(Environment.NewLine, adapters)
-            : "未发现已分配 IPv4 的网卡（请检查 USB 网卡是否启用并已配置 IP）";
-        if (readErrors.Count > 0)
-            result += Environment.NewLine + "部分网卡读取失败：" + string.Join("；", readErrors);
-
-        LocalIpAddressesText = result;
+        LocalIpAddressesText = addresses.Count > 0
+            ? string.Join("  |  ", addresses.OrderBy(address => address, StringComparer.OrdinalIgnoreCase))
+            : "无可用 IPv4 地址";
     }
 
     public void RefreshPorts()

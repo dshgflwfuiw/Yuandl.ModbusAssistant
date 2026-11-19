@@ -49,7 +49,19 @@ const REGISTER_DATA_TYPES: ServerRegisterDataType[] = [
   'Float',
   'Double',
 ];
-const REGISTER_BYTE_ORDERS: ServerRegisterByteOrder[] = ['BigEndian', 'LittleEndian'];
+const REGISTER_BYTE_ORDERS: ServerRegisterByteOrder[] = [
+  'BigEndian',
+  'LittleEndian',
+  'WordSwap',
+  'ByteSwap',
+];
+
+const BYTE_ORDER_LABELS: Record<ServerRegisterByteOrder, string> = {
+  BigEndian: 'ABCD 大端序',
+  LittleEndian: 'DCBA 小端序',
+  WordSwap: 'CDAB 字交换',
+  ByteSwap: 'BADC 字节交换',
+};
 
 export const ConnectionPage: React.FC = () => {
   const {
@@ -1266,7 +1278,7 @@ export const ConnectionPage: React.FC = () => {
             >
               {REGISTER_BYTE_ORDERS.map((bo) => (
                 <option key={bo} value={bo}>
-                  {bo}
+                  {BYTE_ORDER_LABELS[bo]}
                 </option>
               ))}
             </select>

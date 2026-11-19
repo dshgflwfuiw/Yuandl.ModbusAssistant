@@ -39,7 +39,19 @@ const DATA_TYPE_OPTIONS: RegisterDataType[] = [
   'Float',
   'Double',
 ];
-const BYTE_ORDER_OPTIONS: RegisterByteOrder[] = ['BigEndian', 'LittleEndian'];
+const BYTE_ORDER_OPTIONS: RegisterByteOrder[] = [
+  'BigEndian',
+  'LittleEndian',
+  'WordSwap',
+  'ByteSwap',
+];
+
+const BYTE_ORDER_LABELS: Record<RegisterByteOrder, string> = {
+  BigEndian: 'ABCD 大端序',
+  LittleEndian: 'DCBA 小端序',
+  WordSwap: 'CDAB 字交换',
+  ByteSwap: 'BADC 字节交换',
+};
 const MAX_SCOPE_SAMPLES = 600;
 
 export const RegisterMonitorPage: React.FC = () => {
@@ -519,7 +531,7 @@ export const RegisterMonitorPage: React.FC = () => {
                     >
                       {BYTE_ORDER_OPTIONS.map((bo) => (
                         <option key={bo} value={bo}>
-                          {bo}
+                          {BYTE_ORDER_LABELS[bo]}
                         </option>
                       ))}
                     </select>

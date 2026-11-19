@@ -65,8 +65,7 @@ public static class ServerRegisterCodec
                 throw new InvalidOperationException($"数据类型 {type} 不是寄存器数值类型");
         }
 
-        if (byteOrder == ServerRegisterByteOrder.LittleEndian)
-            Array.Reverse(bytes);
+        ApplyByteOrder(bytes, byteOrder);
 
         var registers = new ushort[width];
         for (int i = 0; i < width; i++)
@@ -88,8 +87,7 @@ public static class ServerRegisterCodec
             BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(i * 2, 2), reg);
         }
 
-        if (byteOrder == ServerRegisterByteOrder.LittleEndian)
-            Array.Reverse(bytes);
+        ApplyByteOrder(bytes, byteOrder);
 
         return type switch
         {
@@ -109,6 +107,27 @@ public static class ServerRegisterCodec
         if (normalized is "true" or "1") return true;
         if (normalized is "false" or "0") return false;
         throw new FormatException("线圈/离散输入的值必须为 true/false 或 1/0");
+    }
+
+    private static void ApplyByteOrder(byte[] bytes, ServerRegisterByteOrder byteOrder)
+    {
+        switch (byteOrder)
+        {
+            case ServerRegisterByteOrder.LittleEndian:
+                Array.Reverse(bytes);
+                break;
+            case ServerRegisterByteOrder.WordSwap:
+                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                {
+                    (bytes[i], bytes[i + 2]) = (bytes[i + 2], bytes[i]);
+                    (bytes[i + 1], bytes[i + 3]) = (bytes[i + 3], bytes[i + 1]);
+                }
+                break;
+            case ServerRegisterByteOrder.ByteSwap:
+                for (int i = 0; i + 1 < bytes.Length; i += 2)
+                    (bytes[i], bytes[i + 1]) = (bytes[i + 1], bytes[i]);
+                break;
+        }
     }
 
     public static void Validate(ServerRegisterDefinition definition)

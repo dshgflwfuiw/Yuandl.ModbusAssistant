@@ -24,16 +24,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _persistence = new PersistenceService();
         CommunicationService = new CommunicationService();
         ModbusServerService = new ModbusServerService();
-
-        Connection = new ConnectionViewModel(CommunicationService, ModbusServerService, _persistence);
-        ModbusDebug = new ModbusDebugViewModel(CommunicationService);
-        RawDebug = new RawDebugViewModel(CommunicationService);
-        RegisterMonitor = new RegisterMonitorViewModel(CommunicationService, ModbusServerService);
-        PacketAnalysis = new PacketAnalysisViewModel(CommunicationService);
-        DeviceManagement = new DeviceManagementViewModel(_persistence);
         Settings = new SettingsViewModel(_persistence);
 
-        ModbusDebug.TimeoutMs = Settings.DefaultTimeoutMs;
+        Connection = new ConnectionViewModel(CommunicationService, ModbusServerService, _persistence);
+        ModbusDebug = new ModbusDebugViewModel(CommunicationService, Settings);
+        RawDebug = new RawDebugViewModel(CommunicationService);
+        RegisterMonitor = new RegisterMonitorViewModel(CommunicationService, ModbusServerService, Settings);
+        PacketAnalysis = new PacketAnalysisViewModel(CommunicationService);
+        DeviceManagement = new DeviceManagementViewModel(_persistence);
 
         CommunicationService.StateChanged += (_, _) => RunOnUi(UpdateStatusBar);
         CommunicationService.TrafficCaptured += (_, _) => RunOnUi(UpdateStatusBar);

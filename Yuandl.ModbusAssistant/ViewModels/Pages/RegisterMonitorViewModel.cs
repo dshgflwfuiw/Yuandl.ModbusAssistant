@@ -84,6 +84,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     private readonly CommunicationService _comm;
     private readonly ModbusServerService _server;
+    private readonly SettingsViewModel _settings;
     private readonly DispatcherTimer _pollTimer;
     private readonly Dictionary<string, string> _notesByKey = new();
     private readonly Dictionary<string, bool> _enabledOverrides = new();
@@ -92,10 +93,11 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private bool _isLoadingGroup;
     private const int SampleCapacity = 600;
 
-    public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server)
+    public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server, SettingsViewModel settings)
     {
         _comm = comm;
         _server = server;
+        _settings = settings;
 
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _pollTimer.Tick += async (_, _) => await OnTimerTickAsync();
@@ -623,7 +625,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         foreach (var item in group.DataItems.ToList())
         {
             var req = ModbusFrame.BuildRequest(unitId, item.FunctionCode, item.StartAddress, item.Quantity, transport);
-            var resp = await _comm.ExchangeModbusAsync(req, transport, 1000, 0);
+            var resp = await _comm.ExchangeModbusAsync(req, transport, _settings.DefaultTimeoutMs, _settings.DefaultRetryTimes);
             if (!PollingGroups.Contains(group) || !group.DataItems.Contains(item))
                 continue;
             var parsed = ModbusFrame.ParseResponse(resp, transport);

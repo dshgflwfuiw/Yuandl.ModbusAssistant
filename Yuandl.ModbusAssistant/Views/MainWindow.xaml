@@ -152,7 +152,8 @@
                                 <WrapPanel Margin="0,0,0,10">
                                     <StackPanel Width="200" Margin="0,0,12,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="通道类型" />
-                                        <ComboBox ItemsSource="{Binding CommunicationTypes}"
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}"
+                                                  ItemsSource="{Binding CommunicationTypes}"
                                                   SelectedItem="{Binding SelectedType}"
                                                   Padding="6,4" />
                                     </StackPanel>
@@ -183,19 +184,19 @@
                                     </StackPanel>
                                     <StackPanel Width="105" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="波特率" />
-                                        <ComboBox ItemsSource="{Binding BaudRates}" SelectedItem="{Binding Serial.BaudRate}" Padding="6,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding BaudRates}" SelectedItem="{Binding Serial.BaudRate}" Padding="6,4" />
                                     </StackPanel>
                                     <StackPanel Width="85" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数据位" />
-                                        <ComboBox ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding Serial.DataBits}" Padding="6,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding Serial.DataBits}" Padding="6,4" />
                                     </StackPanel>
                                     <StackPanel Width="105" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="校验位" />
-                                        <ComboBox ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding Serial.Parity}" Padding="6,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding Serial.Parity}" Padding="6,4" />
                                     </StackPanel>
                                     <StackPanel Width="110" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="停止位" />
-                                        <ComboBox ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding Serial.StopBits}" Padding="6,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding Serial.StopBits}" Padding="6,4" />
                                     </StackPanel>
                                     <CheckBox Content="DTR" IsChecked="{Binding Serial.DtrEnable}" VerticalAlignment="Bottom" Margin="4,0,10,12" />
                                     <CheckBox Content="RTS" IsChecked="{Binding Serial.RtsEnable}" VerticalAlignment="Bottom" Margin="0,0,0,12" />
@@ -241,15 +242,13 @@
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="本地监听端口" />
                                             <TextBox Text="{Binding TcpServer.ListenPort}" Padding="6,4" />
                                         </StackPanel>
-                                        <StackPanel MinWidth="220" MaxWidth="520" Margin="0,0,12,8">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="可连接地址（本机任一 IP:端口）" />
+                                        <StackPanel Width="360" Margin="0,0,12,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="本机 IP:端口" />
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshLocalIpAddressesCommand}" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="6,0,0,0" />
-                                                <TextBlock Text="{Binding LocalIpAddressesText}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding LocalIpAddressesText}" VerticalAlignment="Center" FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip="{Binding LocalIpAddressesText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
                                             </DockPanel>
                                         </StackPanel>
-                                        <TextBlock VerticalAlignment="Bottom" Margin="0,0,0,12" FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
-                                                   Text="监听绑定 0.0.0.0，列出的任一 IP:端口均可连接（受网卡状态和防火墙影响）；支持多客户端并发接入" />
                                     </WrapPanel>
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding ServerClients.Count, StringFormat='已连接客户端会话 ({0})'}" />
                                     <DataGrid ItemsSource="{Binding ServerClients}" AutoGenerateColumns="False" IsReadOnly="True" Height="120" HeadersVisibility="Column">
@@ -293,7 +292,7 @@
                                 <WrapPanel Margin="0,0,0,10">
                                     <StackPanel Width="155" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="服务器传输模式" />
-                                        <ComboBox ItemsSource="{Binding ServerTransportModes}" SelectedItem="{Binding ServerMode}" Padding="6,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ServerTransportModes}" SelectedItem="{Binding ServerMode}" Padding="6,4" />
                                     </StackPanel>
                                     <StackPanel Width="80" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="从站站号" />
@@ -310,19 +309,19 @@
                                         </StackPanel>
                                         <StackPanel Width="95" Margin="0,0,8,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="波特率" />
-                                            <ComboBox ItemsSource="{Binding BaudRates}" SelectedItem="{Binding ServerSerial.BaudRate}" Padding="6,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding BaudRates}" SelectedItem="{Binding ServerSerial.BaudRate}" Padding="6,4" />
                                         </StackPanel>
                                         <StackPanel Width="70" Margin="0,0,8,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="数据位" />
-                                            <ComboBox ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding ServerSerial.DataBits}" Padding="6,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding ServerSerial.DataBits}" Padding="6,4" />
                                         </StackPanel>
                                         <StackPanel Width="90" Margin="0,0,8,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="校验位" />
-                                            <ComboBox ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding ServerSerial.Parity}" Padding="6,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding ServerSerial.Parity}" Padding="6,4" />
                                         </StackPanel>
                                         <StackPanel Width="95" Margin="0,0,10,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="停止位" />
-                                            <ComboBox ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding ServerSerial.StopBits}" Padding="6,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding ServerSerial.StopBits}" Padding="6,4" />
                                         </StackPanel>
                                     </WrapPanel>
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">
@@ -337,7 +336,7 @@
                                 <WrapPanel Margin="0,0,0,10">
                                     <StackPanel Width="190" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="存储区" />
-                                        <ComboBox ItemsSource="{Binding RegisterAreas}" SelectedItem="{Binding NewArea}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding RegisterAreas}" SelectedItem="{Binding NewArea}" Padding="5,4" />
                                     </StackPanel>
                                     <StackPanel Width="75" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="地址" />
@@ -345,11 +344,11 @@
                                     </StackPanel>
                                     <StackPanel Width="100" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
-                                        <ComboBox ItemsSource="{Binding RegisterDataTypes}" SelectedItem="{Binding NewDataType}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding RegisterDataTypes}" SelectedItem="{Binding NewDataType}" Padding="5,4" />
                                     </StackPanel>
                                     <StackPanel Width="110" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
-                                        <ComboBox ItemsSource="{Binding RegisterByteOrders}" SelectedItem="{Binding NewByteOrder}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding RegisterByteOrders}" SelectedItem="{Binding NewByteOrder}" Padding="5,4" />
                                     </StackPanel>
                                     <StackPanel Width="100" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="初始值" />
@@ -446,7 +445,7 @@
                             <WrapPanel Margin="0,0,0,8">
                                 <StackPanel Width="110" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="协议格式" />
-                                    <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="6,4" />
+                                    <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="80" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="站号 (Unit)" />
@@ -559,15 +558,15 @@
                             <WrapPanel Margin="0,0,0,8">
                                 <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="发送编码" />
-                                    <ComboBox ItemsSource="{Binding Encodings}" SelectedItem="{Binding SendEncoding}" Padding="6,4" />
+                                    <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Encodings}" SelectedItem="{Binding SendEncoding}" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="接收编码" />
-                                    <ComboBox ItemsSource="{Binding Encodings}" SelectedItem="{Binding ReceiveEncoding}" Padding="6,4" />
+                                    <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Encodings}" SelectedItem="{Binding ReceiveEncoding}" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="追加结束符" />
-                                    <ComboBox ItemsSource="{Binding Delimiters}" SelectedItem="{Binding Delimiter}" Padding="6,4" />
+                                    <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Delimiters}" SelectedItem="{Binding Delimiter}" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="230" Margin="0,0,10,8" Visibility="{Binding IsTcpServerMode, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="目标 TCP 客户端" />
@@ -670,16 +669,16 @@
                                 <WrapPanel>
                                     <StackPanel Width="145" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数据源" />
-                                        <ComboBox ItemsSource="{Binding DataSources}" SelectedItem="{Binding DataSource}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding DataSources}" SelectedItem="{Binding DataSource}" Padding="5,4" />
                                     </StackPanel>
                                     <StackPanel Width="105" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="视图布局" />
-                                        <ComboBox ItemsSource="{Binding ViewLayouts}" SelectedItem="{Binding ViewLayout}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ViewLayouts}" SelectedItem="{Binding ViewLayout}" Padding="5,4" />
                                     </StackPanel>
                                     <WrapPanel Visibility="{Binding IsPollingMode, Converter={StaticResource BoolToVis}}">
                                         <StackPanel Width="80" Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="协议" />
-                                            <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="5,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="5,4" />
                                         </StackPanel>
                                         <StackPanel Width="60" Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="站号" />
@@ -687,7 +686,7 @@
                                         </StackPanel>
                                         <StackPanel Width="65" Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="功能码" />
-                                            <ComboBox ItemsSource="{Binding ReadFunctions}" SelectedItem="{Binding FunctionCode}" Padding="5,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ReadFunctions}" SelectedItem="{Binding FunctionCode}" Padding="5,4" />
                                         </StackPanel>
                                         <StackPanel Width="70" Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
@@ -700,11 +699,11 @@
                                         <WrapPanel Visibility="{Binding IsRegisterFunction, Converter={StaticResource BoolToVis}}">
                                             <StackPanel Width="88" Margin="0,0,8,6">
                                                 <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
-                                                <ComboBox ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
+                                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
                                             </StackPanel>
                                             <StackPanel Width="90" Margin="0,0,8,6">
                                                 <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
-                                                <ComboBox ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
+                                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
                                             </StackPanel>
                                             <StackPanel Width="65" Margin="0,0,8,6">
                                                 <TextBlock Style="{StaticResource FieldLabel}" Text="缩放" />
@@ -719,7 +718,7 @@
                                     <Button Style="{StaticResource PrimaryButton}" Content="＋ 添加数据到当前组" Command="{Binding AddPollingDataCommand}" IsEnabled="{Binding IsPollingMode}" VerticalAlignment="Bottom" Margin="0,0,12,6" />
                                     <StackPanel Width="80" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="时窗(秒)" />
-                                        <ComboBox ItemsSource="{Binding TimeWindows}" SelectedItem="{Binding TimeWindowSec}" Padding="5,4" />
+                                        <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding TimeWindows}" SelectedItem="{Binding TimeWindowSec}" Padding="5,4" />
                                     </StackPanel>
                                     <CheckBox Content="采样点" IsChecked="{Binding ShowMarkers}" VerticalAlignment="Bottom" Margin="4,0,10,10" />
                                     <CheckBox Content="自动 Y 轴" IsChecked="{Binding AutoScaleY}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
@@ -741,7 +740,7 @@
                                         </StackPanel>
                                         <StackPanel Width="85" Margin="0,0,6,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="边沿" />
-                                            <ComboBox ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
+                                            <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
                                         </StackPanel>
                                         <StackPanel Width="75" Margin="0,0,8,6">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="触发电平" />
@@ -837,10 +836,13 @@
                                     <DataGridTemplateColumn Header="曲线" Width="75">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <Button Content="{Binding IsEnabledInScope}"
+                                                <Button Content="{Binding ScopeToggleText}"
                                                         Padding="6,2"
                                                         Background="{Binding TraceColorHex, Converter={StaticResource HexToBrush}}"
-                                                        Foreground="Black"
+                                                    Foreground="White"
+                                                    FontWeight="SemiBold"
+                                                    BorderBrush="#334155"
+                                                    BorderThickness="1"
                                                         Command="{Binding DataContext.ToggleChannelScopeCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                         CommandParameter="{Binding}" />
                                             </DataTemplate>
@@ -878,7 +880,7 @@
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                 <CheckBox Content="实时捕获收发流量" IsChecked="{Binding IsCapturing}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                <ComboBox ItemsSource="{Binding CaptureModes}" SelectedItem="{Binding CaptureTransport}" Width="95" Margin="0,0,10,0" Padding="5,4" />
+                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding CaptureModes}" SelectedItem="{Binding CaptureTransport}" Width="95" Margin="0,0,10,0" Padding="5,4" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="清空统计" Command="{Binding ClearCommand}" />
                             </StackPanel>
                             <StackPanel>
@@ -910,7 +912,7 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource FieldLabel}" Text="离线手动解析 HEX 报文" />
                             <DockPanel>
-                                <ComboBox DockPanel.Dock="Left" ItemsSource="{Binding ManualTransports}" SelectedItem="{Binding ManualTransport}" Width="90" Margin="0,0,8,0" Padding="5,4" />
+                                <ComboBox DockPanel.Dock="Left" Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding ManualTransports}" SelectedItem="{Binding ManualTransport}" Width="90" Margin="0,0,8,0" Padding="5,4" />
                                 <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="手动解析" Command="{Binding ParseManualCommand}" Margin="8,0,0,0" />
                                 <TextBox Text="{Binding ManualHexInput, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" Padding="6,4" />
                             </DockPanel>
@@ -944,7 +946,7 @@
                                 </StackPanel>
                                 <StackPanel Width="140" Margin="0,0,10,6">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="协议类型" />
-                                    <ComboBox ItemsSource="{Binding Protocols}" SelectedItem="{Binding Protocol}" Padding="6,4" />
+                                    <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding Protocols}" SelectedItem="{Binding Protocol}" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="200" Margin="0,0,10,6">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="通讯端点 (IP:Port / COM)" />
