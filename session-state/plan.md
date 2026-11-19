@@ -385,12 +385,13 @@
 
 ## 当前状态检查
 
-- 当前工作目录不是 Git 仓库：`git status` 和 `git remote -v` 均提示没有 `.git`。
-- 当前没有发现 `.gitignore`。
-- GitHub CLI 已安装，但 `gh auth status` 显示尚未登录。
-- 因此目前不能推送代码，也没有可识别的远程仓库目标。
-- 根目录包含 `HslCommunication.dll`，主项目通过本地 DLL 引用；该文件是否可再分发尚未确认。
-- 项目构建输出、测试输出、`.vs` 和 `obj/bin` 目录应默认排除，避免上传生成文件和本机状态。
+- 本地 Git 仓库已由 Visual Studio 创建，当前分支为 `master`，初始提交为 `93c5c4e`（`添加项目文件。`），工作区干净。
+- 已配置远程 `origin=https://github.com/dshgflwfuiw/Yuandl.ModbusAssistant.git`。
+- 提交包括 76 个文件；没有看到 `.vs`、`bin`、`obj` 或 `TestResults` 构建产物，说明忽略规则正在生效。
+- 提交包含 `HslCommunication.dll`（约 3.34 MB）及 `session-state/plan.md`。DLL 的再分发许可未确认；`session-state/plan.md` 是本次工作记录，不建议作为应用仓库内容发布。
+- GitHub CLI 已安装但 `gh auth status` 显示尚未登录；推送也可能需要完成 GitHub 凭据授权。
+- Visual Studio 推送错误为 Schannel 无法确认服务器证书吊销状态（`schannel: the revocation status is unknown`）。
+- 当前全局 Git 配置 `C:/Users/Lenovo/.gitconfig` 已设置 `http.schannelcheckrevoke=false`，但报告的推送仍出现吊销状态错误；这表明应检查 Git 版本/配置优先级/代理和 Windows 证书状态，而不应再关闭证书校验。
 
 ## 用户已选范围
 
@@ -398,26 +399,20 @@
 - 用户明确希望将根目录的 `HslCommunication.dll` 一并上传。
 - 仓库可见性未说明；默认采用私有仓库，除非用户明确要求公开。
 
-## 建议范围与安全边界
+## 推送故障诊断与恢复步骤
 
-- 上传应用源码、XAML、解决方案、项目文件、测试源码，以及用户指定的 `HslCommunication.dll`（前提是用户确认拥有或取得该 DLL 的再分发权）。
-- 默认排除 `.vs/`、`**/bin/`、`**/obj/`、`TestResults/`、用户/IDE 状态、临时构建输出及任何凭证/私密配置。
-- 用户明确要求上传该 DLL，但现有信息不能确认其版权/再分发许可。必须在上传前确认其再分发权；未确认前不得将 DLL 放入 Git 或推送。若无许可，改为使用可合法恢复的依赖或在仓库文档中说明本地依赖获取方式，并验证构建。
-- 上传前检查全部待跟踪内容，确认没有密钥、个人路径、现场设备地址、私有数据或不应公开的第三方文件。
-- 采用一个明确的初始提交，并在提交消息末尾添加项目要求的 Co-authored-by trailer。
+1. 不要关闭 `http.sslVerify`，也不要继续关闭 Schannel 证书吊销检查；证书校验错误不能用跳过验证的方式规避。
+2. 先确认 Windows 日期/时间自动同步正常；当前机器时区为中国标准时间，查看系统时间只用于排查，不代表时间偏差已确认。
+3. 在公司/校园/代理/受限网络环境下，检查 Git for Windows 使用的代理和防火墙是否可访问证书链中的 CRL/OCSP 吊销检查地址；优先尝试正常可访问互联网的网络或修复代理策略。
+4. 检查 Windows 根证书/中间证书更新和 Git for Windows 版本，并确认 `http.schannelCheckRevoke=false` 的来源、当前 Git 进程是否读取该配置及是否被环境/命令行覆盖。不要把关闭吊销检查当作最终修复。
+5. 完成证书链/网络修复后，先运行只读的 `git ls-remote origin` 验证 TLS，再登录 GitHub：`gh auth login`，选择 GitHub.com、HTTPS 和浏览器授权，然后用 `gh auth status` 验证登录。
+6. 推送前审查已有提交：将 `session-state/plan.md` 从发布内容中排除；确认 `HslCommunication.dll` 的再分发授权，若无权分发则从提交发布内容排除并替换为合法可恢复的依赖。
+7. 确认仓库保持私有，执行推送并核验 GitHub 上的分支和提交内容。
 
-## 执行步骤（用户确认开始且完成授权后）
+## 执行边界与待处理项
 
-1. 使用已登录的 GitHub CLI 新建私有仓库；若用户改为公开，先再次明确确认。
-2. 确认 `HslCommunication.dll` 的再分发许可；不要询问或处理访问令牌明文。
-3. 添加 `.gitignore`，覆盖 Visual Studio、.NET 构建输出、测试结果和本机配置。
-4. 检查待上传文件和忽略规则，确认构建/测试产物及敏感内容均被排除；确认 DLL 仅在再分发许可明确后纳入。
-5. 初始化 Git 并检查暂存区完整清单，避免无关文件、凭证或未授权第三方文件进入提交。
-6. 在上传前运行项目构建和测试；若依赖 DLL 不能合法纳入则先解决依赖恢复。
-7. 创建初始提交、配置新仓库远程并推送，核验远程分支和提交。
-
-## 仍需确认
-
-- GitHub CLI 尚未登录：用户需通过 `gh auth login` 完成授权。
-- 用户需确认拥有 `HslCommunication.dll` 的版权或再分发授权。尽管用户要求上传该文件，当前仍不能假定其拥有分发权。
+- 当前本地初始提交已存在，远程 URL 已配置；这次推送失败未能证明远程是否已成功创建，需待 TLS 与认证恢复后查询。
+- GitHub CLI 尚未登录，需用户通过 `gh auth login` 完成授权；不要询问或处理访问令牌明文。
+- `HslCommunication.dll` 已在本地初始提交中，但其再分发授权未确认。未确认前不应推送含该 DLL 的提交。
+- `session-state/plan.md` 作为内部工作记录被初始提交跟踪，建议在推送前从发布提交中移除并加入忽略规则；不得为了处理此事改写用户提交，需在用户允许后做安全、明确的提交整理。
 - 仓库可见性默认为私有；公开需用户明确提出。
