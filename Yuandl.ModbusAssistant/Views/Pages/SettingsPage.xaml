@@ -1,0 +1,62 @@
+<Page x:Class="Yuandl.ModbusAssistant.Views.Pages.SettingsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+      xmlns:ui="http://schemas.yuandl.cn/xamltheme/2024/xaml"
+      xmlns:pages="clr-namespace:Yuandl.ModbusAssistant.ViewModels.Pages"
+      mc:Ignorable="d" 
+      d:DesignHeight="600" d:DesignWidth="900"
+      d:DataContext="{d:DesignInstance pages:SettingsViewModel}"
+      Title="系统设置">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <ui:TextBlock Text="系统设置" FontTypography="Title" Margin="0,0,0,6" />
+            <ui:TextBlock Text="个性化界面风格、通讯超时与系统偏好配置"
+                          Foreground="{ui:ThemeResource ControlTextSecondaryColorBrush}" Margin="0,0,0,16" />
+
+            <!-- 外观与主题 -->
+            <ui:TextBlock Text="外观表现" FontTypography="Subtitle" Margin="0,8,0,8" />
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon DarkTheme24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <ui:TextBlock Text="应用程序主题" FontTypography="Body" />
+                        <ui:TextBlock Text="切换 Windows 11 Fluent 浅色或深色设计风格"
+                                      Foreground="{ui:ThemeResource ControlTextSecondaryColorBrush}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ComboBox SelectedIndex="{Binding ViewModel.SelectedThemeIndex, RelativeSource={RelativeSource AncestorType=Page}}"
+                          SelectionChanged="ThemeComboBox_SelectionChanged"
+                          MinWidth="180">
+                    <ComboBoxItem Content="浅色模式 (Light)" />
+                    <ComboBoxItem Content="深色模式 (Dark)" />
+                </ComboBox>
+            </ui:CardControl>
+
+            <!-- 默认通讯参数 -->
+            <ui:TextBlock Text="默认通讯控制" FontTypography="Subtitle" Margin="0,12,0,8" />
+            <ui:CardControl Margin="0,0,0,12" Icon="{ui:SymbolIcon WindowWrench20}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <ui:TextBlock Text="通讯默认超时 (ms)" FontTypography="Body" />
+                        <ui:TextBlock Text="请求发送后等待从站或对端返回的最长等待毫秒数"
+                                      Foreground="{ui:ThemeResource ControlTextSecondaryColorBrush}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBox Text="{Binding ViewModel.DefaultTimeoutMs, RelativeSource={RelativeSource AncestorType=Page}}"
+                         MinWidth="120" HorizontalContentAlignment="Center" />
+            </ui:CardControl>
+
+            <!-- 软件信息 -->
+            <ui:TextBlock Text="软件信息" FontTypography="Subtitle" Margin="0,12,0,8" />
+            <ui:Card Margin="0,0,0,12" Padding="16">
+                <StackPanel>
+                    <ui:TextBlock Text="Yuandl Modbus Assistant v1.0.0" FontTypography="BodyStrong" Margin="0,0,0,4" />
+                    <ui:TextBlock Text="基于 .NET 8 与 Yuandl.ThemeUI 2.0.7 构建的专业工业通讯与协议分析套件"
+                                  Foreground="{ui:ThemeResource ControlTextSecondaryColorBrush}" />
+                </StackPanel>
+            </ui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
