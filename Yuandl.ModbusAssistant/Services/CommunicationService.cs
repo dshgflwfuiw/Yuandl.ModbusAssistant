@@ -24,10 +24,26 @@ public sealed class CommunicationService : IDisposable
     public event EventHandler<IReadOnlyList<TcpServerClientSession>>? ClientsChanged;
     public event EventHandler<string>? ErrorOccurred;
 
-    public async Task ConnectSerialAsync(SerialPortParameters parameters)
+    public async Task ConnectSerialAsync(SerialPortParameters parameters, ModbusServerService? modbusServer = null)
     {
         await DisconnectAsync();
-        await OpenChannelAsync(new SerialPortChannel(parameters));
+        if (modbusServer != null && modbusServer.IsSerialEndpointMatch(parameters))
+        {
+            await OpenChannelAsync(new VirtualLoopbackSerialChannel(parameters, modbusServer.HandleSerialRequest));
+            return;
+        }
+
+        try
+        {
+            await OpenChannelAsync(new SerialPortChannel(parameters));
+        }
+        catch
+        {
+            if (modbusServer != null && modbusServer.IsSerialEndpointMatch(parameters))
+                await OpenChannelAsync(new VirtualLoopbackSerialChannel(parameters, modbusServer.HandleSerialRequest));
+            else
+                throw;
+        }
     }
 
     public async Task ConnectTcpClientAsync(TcpClientParameters parameters)

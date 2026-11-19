@@ -202,6 +202,53 @@ public sealed class SerialPortChannel : ChannelBase
     }
 }
 
+public sealed class VirtualLoopbackSerialChannel : ChannelBase
+{
+    private readonly SerialPortParameters _parameters;
+    private readonly Func<SerialPortParameters, byte[], byte[]?> _serverHandler;
+
+    public VirtualLoopbackSerialChannel(
+        SerialPortParameters parameters,
+        Func<SerialPortParameters, byte[], byte[]?> serverHandler)
+    {
+        _parameters = parameters.Clone();
+        _serverHandler = serverHandler;
+    }
+
+    public override CommunicationType Type => CommunicationType.SerialPort;
+
+    public override Task OpenAsync(CancellationToken cancellationToken = default)
+    {
+        State = ChannelState.Connected;
+        return Task.CompletedTask;
+    }
+
+    public override Task SendAsync(byte[] data, string? targetSessionId = null, CancellationToken cancellationToken = default)
+    {
+        if (State != ChannelState.Connected)
+            throw new InvalidOperationException("虚拟串口未连接");
+
+        RecordSent(data.Length);
+        var reply = _serverHandler(_parameters, data);
+        if (reply is { Length: > 0 })
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(5, CancellationToken.None);
+                if (State == ChannelState.Connected)
+                    OnDataReceived(reply);
+            }, CancellationToken.None);
+        }
+        return Task.CompletedTask;
+    }
+
+    public override Task CloseAsync()
+    {
+        State = ChannelState.Disconnected;
+        return Task.CompletedTask;
+    }
+}
+
 public sealed class TcpClientChannel : ChannelBase
 {
     private readonly TcpClientParameters _parameters;

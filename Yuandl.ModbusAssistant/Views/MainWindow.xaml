@@ -3,10 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Yuandl.ModbusAssistant.Controls"
         Title="Yuandl.ModbusAssistant — 工业协议与 Modbus 调试工作站 (.NET 8 WPF)"
-        Width="1360"
-        Height="860"
-        MinWidth="1080"
-        MinHeight="700"
+        Width="1380"
+        Height="880"
+        MinWidth="1100"
+        MinHeight="720"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgCanvasBrush}"
         Foreground="{DynamicResource TextPrimaryBrush}">
@@ -63,7 +63,7 @@
                         <!-- Client / Transport Channel Card -->
                         <Border Style="{StaticResource CardBorder}">
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="通讯通道配置 (主站 / 串口 / TCP / UDP / 无协议服务端)" />
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="通讯通道配置 (串口 / TCP 客户端 / UDP / 无协议 TCP 服务端)" />
                                 <WrapPanel Margin="0,0,0,10">
                                     <StackPanel Width="200" Margin="0,0,12,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="通道类型" />
@@ -89,22 +89,22 @@
 
                                 <!-- Serial Parameters -->
                                 <WrapPanel Visibility="{Binding IsSerialSelected, Converter={StaticResource BoolToVis}}">
-                                    <StackPanel Width="140" Margin="0,0,10,8">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="串口号" />
+                                    <StackPanel Width="150" Margin="0,0,10,8">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="串口号 (支持同口环回仿真)" />
                                         <DockPanel>
                                             <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshPortsCommand}" Style="{StaticResource SecondaryButton}" Padding="6,4" Margin="4,0,0,0" />
                                             <ComboBox ItemsSource="{Binding AvailablePorts}" SelectedItem="{Binding Serial.PortName}" IsEditable="True" Padding="6,4" />
                                         </DockPanel>
                                     </StackPanel>
-                                    <StackPanel Width="110" Margin="0,0,10,8">
+                                    <StackPanel Width="105" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="波特率" />
                                         <ComboBox ItemsSource="{Binding BaudRates}" SelectedItem="{Binding Serial.BaudRate}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="90" Margin="0,0,10,8">
+                                    <StackPanel Width="85" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数据位" />
                                         <ComboBox ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding Serial.DataBits}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="110" Margin="0,0,10,8">
+                                    <StackPanel Width="105" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="校验位" />
                                         <ComboBox ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding Serial.Parity}" Padding="6,4" />
                                     </StackPanel>
@@ -112,6 +112,8 @@
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="停止位" />
                                         <ComboBox ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding Serial.StopBits}" Padding="6,4" />
                                     </StackPanel>
+                                    <CheckBox Content="DTR" IsChecked="{Binding Serial.DtrEnable}" VerticalAlignment="Bottom" Margin="4,0,10,12" />
+                                    <CheckBox Content="RTS" IsChecked="{Binding Serial.RtsEnable}" VerticalAlignment="Bottom" Margin="0,0,0,12" />
                                 </WrapPanel>
 
                                 <!-- TCP Client Parameters -->
@@ -141,7 +143,7 @@
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="远端端口" />
                                         <TextBox Text="{Binding Udp.RemotePort}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="110" Margin="0,0,10,8">
+                                    <StackPanel Width="120" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="本地端口 (0=自动)" />
                                         <TextBox Text="{Binding Udp.LocalPort}" Padding="6,4" />
                                     </StackPanel>
@@ -150,17 +152,20 @@
                                 <!-- TCP Server Parameters + Connected Clients -->
                                 <StackPanel Visibility="{Binding IsTcpServerSelected, Converter={StaticResource BoolToVis}}">
                                     <WrapPanel Margin="0,0,0,8">
-                                        <StackPanel Width="140" Margin="0,0,10,8">
+                                        <StackPanel Width="150" Margin="0,0,12,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="本地监听端口" />
                                             <TextBox Text="{Binding TcpServer.ListenPort}" Padding="6,4" />
                                         </StackPanel>
+                                        <TextBlock VerticalAlignment="Bottom" Margin="0,0,0,12" FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
+                                                   Text="支持多客户端并发接入；可在「原始报文」页选择指定客户端定向发送或广播" />
                                     </WrapPanel>
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="已连接客户端会话" />
-                                    <DataGrid ItemsSource="{Binding ServerClients}" AutoGenerateColumns="False" IsReadOnly="True" Height="110" HeadersVisibility="Column">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding ServerClients.Count, StringFormat='已连接客户端会话 ({0})'}" />
+                                    <DataGrid ItemsSource="{Binding ServerClients}" AutoGenerateColumns="False" IsReadOnly="True" Height="120" HeadersVisibility="Column">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="会话ID" Binding="{Binding SessionId}" Width="80" />
                                             <DataGridTextColumn Header="远端地址" Binding="{Binding RemoteAddress}" Width="140" />
                                             <DataGridTextColumn Header="端口" Binding="{Binding RemotePort}" Width="80" />
+                                            <DataGridTextColumn Header="接入时间" Binding="{Binding ConnectedAtText}" Width="95" />
                                             <DataGridTextColumn Header="已发 (B)" Binding="{Binding BytesSent}" Width="90" />
                                             <DataGridTextColumn Header="已收 (B)" Binding="{Binding BytesReceived}" Width="90" />
                                             <DataGridTemplateColumn Header="操作" Width="80">
@@ -190,34 +195,42 @@
                                         <Button Style="{StaticResource SecondaryButton}" Content="导出 JSON" Command="{Binding ExportConfigCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="重置初始值" Command="{Binding ResetRegistersCommand}" />
                                     </StackPanel>
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="内置 Modbus 从站服务器 (支持 TCP / 串口 RTU / 串口 ASCII / 双模 + 在线改值)" Margin="0" VerticalAlignment="Center" />
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="内置 Modbus 从站服务器 (TCP / 串口 RTU / 串口 ASCII / 双通道 + 在线改值)" Margin="0" VerticalAlignment="Center" />
                                 </DockPanel>
 
                                 <WrapPanel Margin="0,0,0,10">
-                                    <StackPanel Width="160" Margin="0,0,10,8">
+                                    <StackPanel Width="155" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="服务器传输模式" />
                                         <ComboBox ItemsSource="{Binding ServerTransportModes}" SelectedItem="{Binding ServerMode}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="90" Margin="0,0,10,8">
+                                    <StackPanel Width="80" Margin="0,0,10,8">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="从站站号" />
                                         <TextBox Text="{Binding ServerStation}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="100" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Width="95" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="TCP 端口" />
                                         <TextBox Text="{Binding ServerPort}" Padding="6,4" />
                                     </StackPanel>
                                     <WrapPanel Visibility="{Binding ServerUsesSerial, Converter={StaticResource BoolToVis}}">
-                                        <StackPanel Width="120" Margin="0,0,10,8">
+                                        <StackPanel Width="115" Margin="0,0,8,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="服务器串口" />
                                             <ComboBox ItemsSource="{Binding AvailablePorts}" SelectedItem="{Binding ServerSerial.PortName}" IsEditable="True" Padding="6,4" />
                                         </StackPanel>
-                                        <StackPanel Width="100" Margin="0,0,10,8">
+                                        <StackPanel Width="95" Margin="0,0,8,8">
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="波特率" />
                                             <ComboBox ItemsSource="{Binding BaudRates}" SelectedItem="{Binding ServerSerial.BaudRate}" Padding="6,4" />
                                         </StackPanel>
-                                        <StackPanel Width="95" Margin="0,0,10,8">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="校验" />
+                                        <StackPanel Width="70" Margin="0,0,8,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="数据位" />
+                                            <ComboBox ItemsSource="{Binding DataBitsOptions}" SelectedItem="{Binding ServerSerial.DataBits}" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="90" Margin="0,0,8,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="校验位" />
                                             <ComboBox ItemsSource="{Binding ParityOptions}" SelectedItem="{Binding ServerSerial.Parity}" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="95" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="停止位" />
+                                            <ComboBox ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding ServerSerial.StopBits}" Padding="6,4" />
                                         </StackPanel>
                                     </WrapPanel>
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">
@@ -230,23 +243,23 @@
 
                                 <!-- Add Register Definition Row -->
                                 <WrapPanel Margin="0,0,0,10">
-                                    <StackPanel Width="150" Margin="0,0,8,6">
+                                    <StackPanel Width="145" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="存储区" />
                                         <ComboBox ItemsSource="{Binding RegisterAreas}" SelectedItem="{Binding NewArea}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="80" Margin="0,0,8,6">
+                                    <StackPanel Width="75" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="地址" />
                                         <TextBox Text="{Binding NewAddress}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="105" Margin="0,0,8,6">
+                                    <StackPanel Width="100" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
                                         <ComboBox ItemsSource="{Binding RegisterDataTypes}" SelectedItem="{Binding NewDataType}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="115" Margin="0,0,8,6">
+                                    <StackPanel Width="110" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
                                         <ComboBox ItemsSource="{Binding RegisterByteOrders}" SelectedItem="{Binding NewByteOrder}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="105" Margin="0,0,8,6">
+                                    <StackPanel Width="100" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="初始值" />
                                         <TextBox Text="{Binding NewInitialValue}" Padding="5,4" />
                                     </StackPanel>
@@ -258,43 +271,51 @@
                                 </WrapPanel>
 
                                 <!-- Server Register Table with Online Runtime Value Editing -->
-                                <DataGrid ItemsSource="{Binding ServerRegisters}" AutoGenerateColumns="False" CanUserAddRows="False" Height="220" HeadersVisibility="Column">
+                                <DataGrid ItemsSource="{Binding ServerRegisters}" AutoGenerateColumns="False" CanUserAddRows="False" Height="230" HeadersVisibility="Column">
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="存储区" Binding="{Binding Area}" IsReadOnly="True" Width="130" />
                                         <DataGridTextColumn Header="地址" Binding="{Binding Address}" IsReadOnly="True" Width="70" />
                                         <DataGridTextColumn Header="类型" Binding="{Binding DataType}" IsReadOnly="True" Width="85" />
                                         <DataGridTextColumn Header="字节序" Binding="{Binding ByteOrder}" IsReadOnly="True" Width="95" />
                                         <DataGridTextColumn Header="初始值" Binding="{Binding InitialValue}" IsReadOnly="True" Width="85" />
-                                        <DataGridTemplateColumn Header="实时值 (可直接修改)" Width="180">
+                                        <DataGridTemplateColumn Header="实时值 (在线改值：按 Enter 或点击写入 / 位切换)" Width="240">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <DockPanel Margin="2">
-                                                        <Button DockPanel.Dock="Right"
-                                                                Content="写入"
-                                                                Padding="6,2"
-                                                                Margin="4,0,0,0"
-                                                                Command="{Binding DataContext.ApplyRuntimeValueCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                    <Grid Margin="2">
+                                                        <!-- 位类型：一键切换 -->
+                                                        <Button Content="{Binding BitDisplayText}"
+                                                                Padding="8,3"
+                                                                Visibility="{Binding IsBit, Converter={StaticResource BoolToVis}}"
+                                                                Command="{Binding DataContext.ToggleBitRuntimeCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                                 CommandParameter="{Binding}" />
-                                                        <TextBox Text="{Binding CurrentValue, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" />
-                                                    </DockPanel>
+                                                        <!-- 数值类型：在线编辑 + Enter / 写入按钮 -->
+                                                        <DockPanel Visibility="{Binding IsNumeric, Converter={StaticResource BoolToVis}}">
+                                                            <Button DockPanel.Dock="Right"
+                                                                    Content="写入"
+                                                                    Padding="8,2"
+                                                                    Margin="4,0,0,0"
+                                                                    Command="{Binding DataContext.ApplyRuntimeValueCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                                    CommandParameter="{Binding}" />
+                                                            <TextBox Text="{Binding CurrentValue, UpdateSourceTrigger=PropertyChanged}" Padding="4,2">
+                                                                <TextBox.InputBindings>
+                                                                    <KeyBinding Key="Enter"
+                                                                                Command="{Binding DataContext.ApplyRuntimeValueCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                                                CommandParameter="{Binding}" />
+                                                                </TextBox.InputBindings>
+                                                            </TextBox>
+                                                        </DockPanel>
+                                                    </Grid>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
                                         <DataGridTextColumn Header="备注" Binding="{Binding Note}" IsReadOnly="True" Width="*" />
-                                        <DataGridTemplateColumn Header="操作" Width="135">
+                                        <DataGridTemplateColumn Header="操作" Width="75">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <Button Content="翻转位"
-                                                                Padding="5,2"
-                                                                Margin="0,0,4,0"
-                                                                Command="{Binding DataContext.ToggleBitRuntimeCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                                CommandParameter="{Binding}" />
-                                                        <Button Content="删除"
-                                                                Padding="5,2"
-                                                                Command="{Binding DataContext.DeleteRegisterCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                                CommandParameter="{Binding}" />
-                                                    </StackPanel>
+                                                    <Button Content="删除"
+                                                            Padding="6,2"
+                                                            Command="{Binding DataContext.DeleteRegisterCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                            CommandParameter="{Binding}" />
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
@@ -313,13 +334,12 @@
                 <Grid Margin="18" DataContext="{Binding ModbusDebug}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="0">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="Modbus 主站请求构造与执行 (FC 01 - 10)" />
+                            <TextBlock Style="{StaticResource SectionTitle}" Text="Modbus 主站请求构造与执行 (FC 01 - 10，支持 0F/10 批量写入)" />
                             <WrapPanel Margin="0,0,0,8">
                                 <StackPanel Width="110" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="协议格式" />
@@ -329,7 +349,7 @@
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="站号 (Unit)" />
                                     <TextBox Text="{Binding UnitId, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="260" Margin="0,0,10,8">
+                                <StackPanel Width="270" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="功能码 (Function Code)" />
                                     <ComboBox ItemsSource="{Binding Functions}" SelectedItem="{Binding SelectedFunction}" Padding="6,4" />
                                 </StackPanel>
@@ -337,20 +357,43 @@
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
                                     <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="170" Margin="0,0,10,8" Visibility="{Binding IsReadOrSingle, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Width="185" Margin="0,0,10,8" Visibility="{Binding IsReadOrSingle, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding QuantityOrValueLabel}" />
                                     <TextBox Text="{Binding QuantityOrValue, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="280" Margin="0,0,10,8" Visibility="{Binding IsBatchWrite, Converter={StaticResource BoolToVis}}">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="批量值列表 (逗号/空格分隔)" />
-                                    <TextBox Text="{Binding BatchValuesText, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
-                                </StackPanel>
-                                <StackPanel Width="100" Margin="0,0,10,8">
+                                <StackPanel Width="95" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="超时 (ms)" />
                                     <TextBox Text="{Binding TimeoutMs}" Padding="6,4" />
                                 </StackPanel>
-                                <Button Style="{StaticResource PrimaryButton}" Content="发送请求" Command="{Binding ExecuteCommand}" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">
+                                    <Button Style="{StaticResource SecondaryButton}" Content="生成请求" Command="{Binding BuildPreviewCommand}" Margin="0,0,8,0" />
+                                    <Button Style="{StaticResource PrimaryButton}" Content="发送请求" Command="{Binding ExecuteCommand}" Margin="0,0,8,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="解析响应" Command="{Binding ParseManualResponseCommand}" />
+                                </StackPanel>
                             </WrapPanel>
+
+                            <!-- 0F / 10 Batch Multi-Value Editor -->
+                            <Border Visibility="{Binding IsBatchWrite, Converter={StaticResource BoolToVis}}"
+                                    Background="{DynamicResource BgSurfaceAltBrush}"
+                                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="10"
+                                    Margin="0,0,0,10">
+                                <StackPanel>
+                                    <DockPanel Margin="0,0,0,4">
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding BatchParsedStatus}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" FontSize="12" />
+                                        <TextBlock Text="{Binding BatchListHint}" FontSize="12" FontWeight="SemiBold" />
+                                    </DockPanel>
+                                    <TextBox Text="{Binding BatchValuesText, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             Height="54"
+                                             VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas"
+                                             Padding="6,4" />
+                                </StackPanel>
+                            </Border>
 
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -359,19 +402,19 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="待发送报文预览 (HEX)" />
-                                    <TextBox Text="{Binding RequestPreviewHex, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" Padding="6,4" />
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="请求报文 (HEX)" />
+                                    <TextBox Text="{Binding RequestPreviewHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="设备响应报文 (HEX)" />
-                                    <TextBox Text="{Binding ResponseHex, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" Padding="6,4" />
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="响应报文 (HEX)" />
+                                    <TextBox Text="{Binding ResponseHex, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" Padding="6,4" />
                                 </StackPanel>
                             </Grid>
                             <TextBlock Text="{Binding SummaryText}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,8,0,0" />
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource CardBorder}" Grid.Row="2" Margin="0">
+                    <Border Style="{StaticResource CardBorder}" Grid.Row="1" Margin="0">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionTitle}" Text="解码数据表" />
                             <DataGrid ItemsSource="{Binding DecodedItems}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
@@ -397,23 +440,39 @@
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="0">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="无协议字节流 / 多客户端定向收发" />
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding CountersText}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="无协议字节流 / 多客户端定向收发" Margin="0" />
+                            </DockPanel>
                             <WrapPanel Margin="0,0,0,8">
-                                <StackPanel Width="110" Margin="0,0,10,8">
+                                <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="发送编码" />
                                     <ComboBox ItemsSource="{Binding Encodings}" SelectedItem="{Binding SendEncoding}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="110" Margin="0,0,10,8">
+                                <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="接收编码" />
                                     <ComboBox ItemsSource="{Binding Encodings}" SelectedItem="{Binding ReceiveEncoding}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="110" Margin="0,0,10,8">
+                                <StackPanel Width="105" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="追加结束符" />
                                     <ComboBox ItemsSource="{Binding Delimiters}" SelectedItem="{Binding Delimiter}" Padding="6,4" />
                                 </StackPanel>
-                                <StackPanel Width="240" Margin="0,0,10,8" Visibility="{Binding IsTcpServerMode, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Width="230" Margin="0,0,10,8" Visibility="{Binding IsTcpServerMode, Converter={StaticResource BoolToVis}}">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="目标 TCP 客户端" />
                                     <ComboBox ItemsSource="{Binding TcpClients}" SelectedItem="{Binding SelectedClient}" DisplayMemberPath="DisplayLabel" Padding="6,4" />
+                                </StackPanel>
+                                <StackPanel Width="180" Margin="0,0,10,8">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="发送历史" />
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="清空" Command="{Binding ClearHistoryCommand}" Style="{StaticResource SecondaryButton}" Padding="6,4" Margin="4,0,0,0" />
+                                        <ComboBox ItemsSource="{Binding SendHistory}" SelectedItem="{Binding SelectedHistoryItem}" Padding="6,4" />
+                                    </DockPanel>
+                                </StackPanel>
+                                <CheckBox Content="暂停接收" IsChecked="{Binding IsPauseReceive}" VerticalAlignment="Bottom" Margin="4,0,12,12" />
+                                <CheckBox Content="定时发送" IsChecked="{Binding IsLoopSend}" VerticalAlignment="Bottom" Margin="0,0,6,12" />
+                                <StackPanel Width="75" Margin="0,0,0,8">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="间隔(ms)" />
+                                    <TextBox Text="{Binding LoopIntervalMs}" Padding="5,4" />
                                 </StackPanel>
                             </WrapPanel>
                             <DockPanel>
@@ -432,8 +491,9 @@
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionTitle}" Text="实时收发历史" />
                             <DataGrid ItemsSource="{Binding Messages}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="时间" Binding="{Binding Timestamp}" Width="110" />
-                                    <DataGridTextColumn Header="方向" Binding="{Binding Direction}" Width="70" />
+                                    <DataGridTextColumn Header="时间" Binding="{Binding Timestamp}" Width="105" />
+                                    <DataGridTextColumn Header="方向" Binding="{Binding Direction}" Width="65" />
+                                    <DataGridTextColumn Header="字节数" Binding="{Binding ByteLength}" Width="65" />
                                     <DataGridTextColumn Header="会话" Binding="{Binding SessionLabel}" Width="160" />
                                     <DataGridTextColumn Header="报文内容" Binding="{Binding Content}" Width="*" />
                                 </DataGrid.Columns>
@@ -455,101 +515,156 @@
                         <StackPanel>
                             <DockPanel Margin="0,0,0,8">
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Style="{StaticResource SecondaryButton}" Content="{Binding SampleOnceLabel}" Command="{Binding SampleOnceCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource PrimaryButton}" Content="开始监听" Command="{Binding StartCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource DangerButton}" Content="停止监听" Command="{Binding StopCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="冻结/恢复波形" Command="{Binding ToggleFreezeCommand}" Margin="0,0,6,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="冻结/恢复" Command="{Binding ToggleFreezeCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="清空波形" Command="{Binding ClearScopeCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="导出 CSV" Command="{Binding ExportCsvCommand}" />
                                 </StackPanel>
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="多通道实时数据监听与波形示波器 (支持 Bool 布尔方波 / Float / Double)" Margin="0" VerticalAlignment="Center" />
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="多通道实时数据监听与示波器中心 (支持 Bool 布尔方波 / Float / Double)" Margin="0" VerticalAlignment="Center" />
                             </DockPanel>
 
                             <WrapPanel>
-                                <StackPanel Width="150" Margin="0,0,10,6">
+                                <StackPanel Width="145" Margin="0,0,8,6">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="数据源" />
                                     <ComboBox ItemsSource="{Binding DataSources}" SelectedItem="{Binding DataSource}" Padding="5,4" />
                                 </StackPanel>
-                                <StackPanel Width="115" Margin="0,0,10,6">
+                                <StackPanel Width="105" Margin="0,0,8,6">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="视图布局" />
                                     <ComboBox ItemsSource="{Binding ViewLayouts}" SelectedItem="{Binding ViewLayout}" Padding="5,4" />
                                 </StackPanel>
                                 <WrapPanel Visibility="{Binding IsPollingMode, Converter={StaticResource BoolToVis}}">
-                                    <StackPanel Width="90" Margin="0,0,8,6">
+                                    <StackPanel Width="80" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="协议" />
                                         <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="65" Margin="0,0,8,6">
+                                    <StackPanel Width="60" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="站号" />
                                         <TextBox Text="{Binding UnitId}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="70" Margin="0,0,8,6">
+                                    <StackPanel Width="65" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="功能码" />
                                         <ComboBox ItemsSource="{Binding ReadFunctions}" SelectedItem="{Binding FunctionCode}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="75" Margin="0,0,8,6">
+                                    <StackPanel Width="70" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
                                         <TextBox Text="{Binding StartAddress}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="65" Margin="0,0,8,6">
+                                    <StackPanel Width="60" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="数量" />
                                         <TextBox Text="{Binding Quantity}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="95" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
-                                        <ComboBox ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
-                                    </StackPanel>
-                                    <StackPanel Width="95" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
-                                        <ComboBox ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
-                                    </StackPanel>
+                                    <WrapPanel Visibility="{Binding IsRegisterFunction, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel Width="88" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
+                                            <ComboBox ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="90" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
+                                            <ComboBox ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="65" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="缩放" />
+                                            <TextBox Text="{Binding Scale}" Padding="5,4" />
+                                        </StackPanel>
+                                    </WrapPanel>
                                 </WrapPanel>
-                                <StackPanel Width="90" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="周期 (ms)" />
+                                <StackPanel Width="80" Margin="0,0,8,6">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="周期(ms)" />
                                     <TextBox Text="{Binding IntervalMs}" Padding="5,4" />
                                 </StackPanel>
-                                <StackPanel Width="90" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="时窗 (秒)" />
+                                <StackPanel Width="80" Margin="0,0,8,6">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="时窗(秒)" />
                                     <ComboBox ItemsSource="{Binding TimeWindows}" SelectedItem="{Binding TimeWindowSec}" Padding="5,4" />
                                 </StackPanel>
-                                <CheckBox Content="自动 Y 轴" IsChecked="{Binding AutoScaleY}" VerticalAlignment="Bottom" Margin="4,0,10,10" />
+                                <CheckBox Content="采样点" IsChecked="{Binding ShowMarkers}" VerticalAlignment="Bottom" Margin="4,0,10,10" />
+                                <CheckBox Content="自动 Y 轴" IsChecked="{Binding AutoScaleY}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
+                                <WrapPanel Visibility="{Binding IsManualY, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Width="70" Margin="0,0,6,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Y Min" />
+                                        <TextBox Text="{Binding ManualYMin, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="70" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Y Max" />
+                                        <TextBox Text="{Binding ManualYMax, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                    </StackPanel>
+                                </WrapPanel>
                                 <CheckBox Content="边沿触发" IsChecked="{Binding TriggerEnabled}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
-                                <StackPanel Width="80" Margin="0,0,8,6" Visibility="{Binding TriggerEnabled, Converter={StaticResource BoolToVis}}">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="触发阈值" />
-                                    <TextBox Text="{Binding TriggerLevel}" Padding="5,4" />
-                                </StackPanel>
-                                <StackPanel Width="95" Margin="0,0,8,6" Visibility="{Binding TriggerEnabled, Converter={StaticResource BoolToVis}}">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="边沿" />
-                                    <ComboBox ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
-                                </StackPanel>
+                                <WrapPanel Visibility="{Binding TriggerEnabled, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Width="125" Margin="0,0,6,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="触发通道" />
+                                        <ComboBox ItemsSource="{Binding ScopeChannels}" SelectedItem="{Binding TriggerChannel}" DisplayMemberPath="Label" Padding="5,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="85" Margin="0,0,6,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="边沿" />
+                                        <ComboBox ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="75" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="触发电平" />
+                                        <TextBox Text="{Binding TriggerLevel, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                    </StackPanel>
+                                </WrapPanel>
                             </WrapPanel>
                             <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource AccentBrush}" Margin="0,4,0,0" />
                         </StackPanel>
                     </Border>
 
-                    <!-- Oscilloscope + Live Value Table -->
+                    <!-- Oscilloscope + Channel Legend + Live Value Table -->
                     <Grid Grid.Row="1">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
                             <RowDefinition Height="10" />
-                            <RowDefinition Height="210" />
+                            <RowDefinition Height="200" />
                         </Grid.RowDefinitions>
 
                         <Border Grid.Row="0"
-                                BorderBrush="{DynamicResource BorderSubtleBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                ClipToBounds="True"
+                                Style="{StaticResource CardBorder}"
+                                Margin="0"
+                                Padding="10"
                                 Visibility="{Binding ShowScope, Converter={StaticResource BoolToVis}}">
-                            <controls:OscilloscopeControl ViewModel="{Binding}" />
+                            <DockPanel>
+                                <!-- Clickable Channel Telemetry Legend Strip -->
+                                <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding ScopeChannels}" Margin="0,0,0,8">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Margin="0,0,6,6"
+                                                    Padding="8,4"
+                                                    Cursor="Hand"
+                                                    Background="{DynamicResource BgSurfaceAltBrush}"
+                                                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                    BorderThickness="1"
+                                                    Command="{Binding DataContext.ToggleChannelScopeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="10" Height="10" CornerRadius="2" Background="{Binding ColorHex, Converter={StaticResource HexToBrush}}" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding LatestText}" FontFamily="Consolas" FontWeight="Bold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding RangeText}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Border BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                                    <controls:OscilloscopeControl ViewModel="{Binding}" />
+                                </Border>
+                            </DockPanel>
                         </Border>
 
                         <Border Grid.Row="2"
                                 Style="{StaticResource CardBorder}"
                                 Margin="0"
                                 Visibility="{Binding ShowTable, Converter={StaticResource BoolToVis}}">
-                            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
+                            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
                                 <DataGrid.Columns>
-                                    <DataGridTemplateColumn Header="曲线显示" Width="85">
+                                    <DataGridTemplateColumn Header="曲线" Width="75">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Button Content="{Binding IsEnabledInScope}"
@@ -561,12 +676,12 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="通道标识" Binding="{Binding Label}" Width="120" />
-                                    <DataGridTextColumn Header="地址" Binding="{Binding Address}" Width="80" />
-                                    <DataGridTextColumn Header="原始值" Binding="{Binding RawValue}" Width="140" />
-                                    <DataGridTextColumn Header="当前显示值" Binding="{Binding DisplayValue}" Width="150" />
-                                    <DataGridTextColumn Header="类型(数字量)" Binding="{Binding IsDigital}" Width="95" />
-                                    <DataGridTextColumn Header="备注" Binding="{Binding Note}" Width="*" />
+                                    <DataGridTextColumn Header="通道标识" Binding="{Binding Label}" IsReadOnly="True" Width="120" />
+                                    <DataGridTextColumn Header="地址" Binding="{Binding Address}" IsReadOnly="True" Width="75" />
+                                    <DataGridTextColumn Header="原始值" Binding="{Binding RawValue}" IsReadOnly="True" Width="140" />
+                                    <DataGridTextColumn Header="当前显示值" Binding="{Binding DisplayValue}" IsReadOnly="True" Width="140" />
+                                    <DataGridTextColumn Header="数字量(Bool)" Binding="{Binding IsDigital}" IsReadOnly="True" Width="90" />
+                                    <DataGridTextColumn Header="备注 (可双击编辑)" Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" Width="*" />
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Border>

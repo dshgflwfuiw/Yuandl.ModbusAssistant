@@ -46,7 +46,10 @@ public sealed class TcpServerClientSession
     public long BytesSent { get; set; }
     public long BytesReceived { get; set; }
 
-    public string DisplayLabel => $"{SessionId} · {RemoteAddress}:{RemotePort}";
+    public string ConnectedAtText => ConnectedAt.ToString("HH:mm:ss");
+    public string DisplayLabel => string.IsNullOrEmpty(SessionId)
+        ? RemoteAddress
+        : $"{SessionId} · {RemoteAddress}:{RemotePort}";
 }
 
 public sealed class ServerRegisterDefinition
@@ -100,6 +103,8 @@ public sealed class RawMessageItem
     public string Timestamp { get; set; } = string.Empty;
     public string Direction { get; set; } = "RX";
     public string Content { get; set; } = string.Empty;
+    public byte[] RawBytes { get; set; } = Array.Empty<byte>();
+    public int ByteLength => RawBytes.Length;
     public string? SessionLabel { get; set; }
 }
 
@@ -136,7 +141,22 @@ public sealed class RegisterMonitorRow
     public bool IsDigital { get; set; }
     public bool IsEnabledInScope { get; set; } = true;
     public string TraceColorHex { get; set; } = "#22D3EE";
-    public string Note { get; set; } = string.Empty;
+
+    private string _note = string.Empty;
+    public string Note
+    {
+        get => _note;
+        set
+        {
+            if (_note != value)
+            {
+                _note = value ?? string.Empty;
+                OnNoteChanged?.Invoke(ChannelId, _note);
+            }
+        }
+    }
+
+    public Action<string, string>? OnNoteChanged { get; set; }
     public string DisplayValue => IsDigital ? (Value >= 0.5 ? "ON (1)" : "OFF (0)") : Value.ToString("G10");
 }
 

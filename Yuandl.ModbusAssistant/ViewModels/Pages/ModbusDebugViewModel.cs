@@ -41,9 +41,15 @@ public sealed class ModbusDebugViewModel : ObservableObject
             new ModbusFunctionOption { Code = 15, Label = "0F (15) - 写多个线圈 (Write Multiple Coils)" },
             new ModbusFunctionOption { Code = 16, Label = "10 (16) - 写多个寄存器 (Write Multiple Registers)" }
         };
-        _selectedFunction = Functions[2]; // 03 default
+        _selectedFunction = Functions[2];
 
+        BuildPreviewCommand = new RelayCommand(() =>
+        {
+            BuildPreview();
+            SummaryText = "请求报文已生成";
+        });
         ExecuteCommand = new AsyncRelayCommand(ExecuteModbusAsync);
+        ParseManualResponseCommand = new RelayCommand(() => DecodeResponseText(ResponseHex));
         BuildPreview();
     }
 
@@ -73,9 +79,15 @@ public sealed class ModbusDebugViewModel : ObservableObject
         {
             if (SetProperty(ref _selectedFunction, value))
             {
+                if (_selectedFunction.Code == 15 && BatchValuesText == "100, 200, 0x012C")
+                    BatchValuesText = "true, false, 1, 0";
+                else if (_selectedFunction.Code == 16 && BatchValuesText == "true, false, 1, 0")
+                    BatchValuesText = "100, 200, 0x012C";
+
                 OnPropertyChanged(nameof(IsBatchWrite));
                 OnPropertyChanged(nameof(IsReadOrSingle));
                 OnPropertyChanged(nameof(QuantityOrValueLabel));
+                OnPropertyChanged(nameof(BatchListHint));
                 BuildPreview();
             }
         }
@@ -95,21 +107,27 @@ public sealed class ModbusDebugViewModel : ObservableObject
         set { if (SetProperty(ref _quantityOrValue, value)) BuildPreview(); }
     }
 
-    private string _batchValuesText = "100, 200, 300";
+    private string _batchValuesText = "100, 200, 0x012C";
     public string BatchValuesText
     {
         get => _batchValuesText;
         set { if (SetProperty(ref _batchValuesText, value)) BuildPreview(); }
     }
 
+    private string _batchParsedStatus = "已解析 3 项";
+    public string BatchParsedStatus { get => _batchParsedStatus; private set => SetProperty(ref _batchParsedStatus, value); }
+
+    private bool _hasBatchError;
+    public bool HasBatchError { get => _hasBatchError; private set => SetProperty(ref _hasBatchError, value); }
+
     private int _timeoutMs = 1000;
     public int TimeoutMs { get => _timeoutMs; set => SetProperty(ref _timeoutMs, value); }
 
     private string _requestPreviewHex = string.Empty;
-    public string RequestPreviewHex { get => _requestPreviewHex; private set => SetProperty(ref _requestPreviewHex, value); }
+    public string RequestPreviewHex { get => _requestPreviewHex; set => SetProperty(ref _requestPreviewHex, value); }
 
     private string _responseHex = string.Empty;
-    public string ResponseHex { get => _responseHex; private set => SetProperty(ref _responseHex, value); }
+    public string ResponseHex { get => _responseHex; set => SetProperty(ref _responseHex, value); }
 
     private string _summaryText = "就绪";
     public string SummaryText { get => _summaryText; private set => SetProperty(ref _summaryText, value); }
@@ -122,17 +140,28 @@ public sealed class ModbusDebugViewModel : ObservableObject
         6 => "写入寄存器值 (0~65535)",
         _ => "数量 (Quantity)"
     };
+    public string BatchListHint => SelectedFunction.Code == 15
+        ? "批量写入线圈 (0F)：支持 true/false/1/0，逗号/空格/换行分隔，最多 1968 项"
+        : "批量写入寄存器 (10)：支持十进制 0~65535 或 0x0000~0xFFFF，最多 123 项";
 
+    public RelayCommand BuildPreviewCommand { get; }
     public AsyncRelayCommand ExecuteCommand { get; }
+    public RelayCommand ParseManualResponseCommand { get; }
 
     private byte[] BuildFrameForTxId(ushort txId)
     {
         byte fn = SelectedFunction.Code;
+        if (fn is 15 or 16)
+        {
+            var vals = ModbusFrame.ParseMultiValues(BatchValuesText, isCoils: fn == 15);
+            BatchParsedStatus = $"已解析 {vals.Length} 项";
+            HasBatchError = false;
+            return ModbusFrame.BuildWriteMultiple(UnitId, fn, Address, vals, Transport, txId);
+        }
+
         return fn switch
         {
             5 or 6 => ModbusFrame.BuildWriteSingle(UnitId, fn, Address, QuantityOrValue, Transport, txId),
-            15 => ModbusFrame.BuildWriteMultiple(UnitId, fn, Address, ModbusFrame.ParseMultiValues(BatchValuesText, isCoils: true), Transport, txId),
-            16 => ModbusFrame.BuildWriteMultiple(UnitId, fn, Address, ModbusFrame.ParseMultiValues(BatchValuesText, isCoils: false), Transport, txId),
             _ => ModbusFrame.BuildRequest(UnitId, fn, Address, QuantityOrValue, Transport, txId)
         };
     }
@@ -146,6 +175,8 @@ public sealed class ModbusDebugViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            HasBatchError = IsBatchWrite;
+            BatchParsedStatus = ex.Message;
             RequestPreviewHex = $"参数错误: {ex.Message}";
         }
     }
@@ -164,52 +195,81 @@ public sealed class ModbusDebugViewModel : ObservableObject
 
             var respBytes = await _comm.ExchangeModbusAsync(frame, Transport, TimeoutMs, retries: 1);
             ResponseHex = ByteUtils.BytesToHex(respBytes);
-
-            var parsed = ModbusFrame.ParseResponse(respBytes, Transport);
-            if (parsed.IsException)
-            {
-                SummaryText = $"Modbus 异常响应 (0x{parsed.FunctionCode:X2}): {ModbusException.Describe(parsed.ExceptionCode ?? 0)}";
-                return;
-            }
-
-            if (parsed.FunctionCode is 1 or 2)
-            {
-                var bits = ModbusFrame.ExtractBits(parsed.Payload, QuantityOrValue);
-                for (int i = 0; i < bits.Length; i++)
-                {
-                    DecodedItems.Add(new ModbusDecodedItem
-                    {
-                        Address = Address + i,
-                        HexValue = bits[i] ? "0x01" : "0x00",
-                        DecimalValue = bits[i] ? "1" : "0",
-                        SignedOrBool = bits[i] ? "ON (True)" : "OFF (False)"
-                    });
-                }
-                SummaryText = $"成功读取 {bits.Length} 个状态位 (FC 0x{parsed.FunctionCode:X2})";
-            }
-            else if (parsed.FunctionCode is 3 or 4)
-            {
-                for (int i = 0; i < parsed.Registers.Length; i++)
-                {
-                    ushort val = parsed.Registers[i];
-                    DecodedItems.Add(new ModbusDecodedItem
-                    {
-                        Address = Address + i,
-                        HexValue = $"0x{val:X4}",
-                        DecimalValue = val.ToString(),
-                        SignedOrBool = ((short)val).ToString()
-                    });
-                }
-                SummaryText = $"成功读取 {parsed.Registers.Length} 个寄存器 (FC 0x{parsed.FunctionCode:X2})";
-            }
-            else
-            {
-                SummaryText = $"写入成功 (功能码 0x{parsed.FunctionCode:X2}，起始地址 {Address})";
-            }
+            DecodeResponseBytes(respBytes);
         }
         catch (Exception ex)
         {
             SummaryText = $"执行失败: {ex.Message}";
+        }
+    }
+
+    private void DecodeResponseText(string hexText)
+    {
+        DecodedItems.Clear();
+        try
+        {
+            var bytes = ByteUtils.HexToBytes(hexText);
+            if (bytes.Length == 0)
+            {
+                SummaryText = "请输入待解析的响应 HEX 报文";
+                return;
+            }
+            DecodeResponseBytes(bytes);
+        }
+        catch (Exception ex)
+        {
+            SummaryText = $"响应解析失败: {ex.Message}";
+        }
+    }
+
+    private void DecodeResponseBytes(byte[] respBytes)
+    {
+        var parsed = ModbusFrame.ParseResponse(respBytes, Transport);
+        if (parsed.IsException)
+        {
+            SummaryText = $"Modbus 异常响应 (0x{parsed.FunctionCode:X2}): {ModbusException.Describe(parsed.ExceptionCode ?? 0)}";
+            return;
+        }
+
+        if (parsed.FunctionCode is 1 or 2)
+        {
+            var bits = ModbusFrame.ExtractBits(parsed.Payload, QuantityOrValue);
+            for (int i = 0; i < bits.Length; i++)
+            {
+                DecodedItems.Add(new ModbusDecodedItem
+                {
+                    Address = Address + i,
+                    HexValue = bits[i] ? "0x01" : "0x00",
+                    DecimalValue = bits[i] ? "1" : "0",
+                    SignedOrBool = bits[i] ? "ON (True)" : "OFF (False)"
+                });
+            }
+            SummaryText = $"成功读取 {bits.Length} 个状态位 (FC 0x{parsed.FunctionCode:X2})";
+        }
+        else if (parsed.FunctionCode is 3 or 4)
+        {
+            for (int i = 0; i < parsed.Registers.Length; i++)
+            {
+                ushort val = parsed.Registers[i];
+                DecodedItems.Add(new ModbusDecodedItem
+                {
+                    Address = Address + i,
+                    HexValue = $"0x{val:X4}",
+                    DecimalValue = val.ToString(),
+                    SignedOrBool = ((short)val).ToString()
+                });
+            }
+            SummaryText = $"成功读取 {parsed.Registers.Length} 个寄存器 (FC 0x{parsed.FunctionCode:X2})";
+        }
+        else if (parsed.FunctionCode is 15 or 16)
+        {
+            int addr = parsed.Payload.Length >= 4 ? (parsed.Payload[0] << 8) | parsed.Payload[1] : Address;
+            int cnt = parsed.Payload.Length >= 4 ? (parsed.Payload[2] << 8) | parsed.Payload[3] : 0;
+            SummaryText = $"批量写入成功 · FC 0x{parsed.FunctionCode:X2} · 起始地址 {addr} · 写入数量 {cnt}";
+        }
+        else
+        {
+            SummaryText = $"写入成功 (功能码 0x{parsed.FunctionCode:X2}，起始地址 {Address})";
         }
     }
 }

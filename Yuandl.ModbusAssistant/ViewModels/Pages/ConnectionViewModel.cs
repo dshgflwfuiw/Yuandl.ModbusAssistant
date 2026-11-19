@@ -19,12 +19,24 @@ public sealed class ServerRegisterRowViewModel : ObservableObject
     public string InitialValue { get; set; } = "0";
     public string Note { get; set; } = string.Empty;
 
+    public bool IsBit => DataType == ServerRegisterDataType.Bit;
+    public bool IsNumeric => !IsBit;
+
     private string _currentValue = "0";
     public string CurrentValue
     {
         get => _currentValue;
-        set => SetProperty(ref _currentValue, value);
+        set
+        {
+            if (SetProperty(ref _currentValue, value))
+                OnPropertyChanged(nameof(BitDisplayText));
+        }
     }
+
+    public string BitDisplayText =>
+        CurrentValue.Equals("true", StringComparison.OrdinalIgnoreCase) || CurrentValue == "1"
+            ? "ON (true)"
+            : "OFF (false)";
 
     public ServerRegisterDefinition ToModel() => new()
     {
@@ -290,7 +302,7 @@ public sealed class ConnectionViewModel : ObservableObject
             switch (SelectedType)
             {
                 case CommunicationType.SerialPort:
-                    await _comm.ConnectSerialAsync(Serial);
+                    await _comm.ConnectSerialAsync(Serial, _server);
                     break;
                 case CommunicationType.TcpClient:
                     await _comm.ConnectTcpClientAsync(TcpClient);
@@ -439,11 +451,13 @@ public sealed class ConnectionViewModel : ObservableObject
 
     private void SyncRuntimeValuesFromServer()
     {
-        var latest = _server.GetDefinitionsWithCurrentValues();
-        for (int i = 0; i < latest.Count && i < ServerRegisters.Count; i++)
+        var map = _server.GetDefinitionsWithCurrentValues()
+            .ToDictionary(d => (d.Area, d.Address), d => d.CurrentValue);
+
+        foreach (var row in ServerRegisters)
         {
-            if (ServerRegisters[i].Area == latest[i].Area && ServerRegisters[i].Address == latest[i].Address)
-                ServerRegisters[i].CurrentValue = latest[i].CurrentValue;
+            if (map.TryGetValue((row.Area, row.Address), out var current))
+                row.CurrentValue = current;
         }
     }
 

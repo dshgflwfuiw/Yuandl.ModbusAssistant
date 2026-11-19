@@ -34,15 +34,17 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 {
     private static readonly string[] ChannelPalette =
     {
-        "#22D3EE", "#34D399", "#F59E0B", "#FB7185",
-        "#A78BFA", "#60A5FA", "#F472B6", "#FACC15"
+        "#22D3EE", "#F59E0B", "#34D399", "#FB7185",
+        "#60A5FA", "#A78BFA", "#F472B6", "#A3E635"
     };
 
     private readonly CommunicationService _comm;
     private readonly ModbusServerService _server;
     private readonly DispatcherTimer _pollTimer;
+    private readonly Dictionary<string, string> _notesByKey = new();
+    private readonly Dictionary<string, bool> _enabledOverrides = new();
     private bool _isPollingTick;
-    private int _sampleCapacity = 600;
+    private const int SampleCapacity = 600;
 
     public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server)
     {
@@ -58,6 +60,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 SampleServerRegisters();
         });
 
+        SampleOnceCommand = new RelayCommand(SampleOnce);
         StartCommand = new RelayCommand(StartMonitoring);
         StopCommand = new RelayCommand(StopMonitoring);
         ToggleFreezeCommand = new RelayCommand(() =>
@@ -68,18 +71,20 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         ClearScopeCommand = new RelayCommand(() =>
         {
             Samples.Clear();
+            RefreshChannelTelemetry();
             ScopeUpdated?.Invoke(this, EventArgs.Empty);
         });
         ExportCsvCommand = new RelayCommand(ExportCsv);
         ToggleChannelScopeCommand = new RelayCommand(p =>
         {
-            if (p is RegisterMonitorRow row)
+            string? id = p switch
             {
-                row.IsEnabledInScope = !row.IsEnabledInScope;
-                var ch = ScopeChannels.FirstOrDefault(c => c.Id == row.ChannelId);
-                if (ch != null) ch.Enabled = row.IsEnabledInScope;
-                ScopeUpdated?.Invoke(this, EventArgs.Empty);
-            }
+                RegisterMonitorRow row => row.ChannelId,
+                ScopeChannelConfig cfg => cfg.Id,
+                string s => s,
+                _ => null
+            };
+            if (id != null) ToggleChannelById(id);
         });
     }
 
@@ -94,7 +99,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     public IReadOnlyList<ModbusTransport> Transports { get; } = Enum.GetValues<ModbusTransport>();
     public IReadOnlyList<RegisterDataType> DataTypes { get; } = Enum.GetValues<RegisterDataType>();
     public IReadOnlyList<RegisterByteOrder> ByteOrders { get; } = Enum.GetValues<RegisterByteOrder>();
-    public IReadOnlyList<int> TimeWindows { get; } = new[] { 10, 30, 60, 120 };
+    public IReadOnlyList<int> TimeWindows { get; } = new[] { 15, 30, 60, 120, 300 };
     public IReadOnlyList<TriggerEdgeMode> TriggerEdges { get; } = Enum.GetValues<TriggerEdgeMode>();
     public IReadOnlyList<byte> ReadFunctions { get; } = new byte[] { 1, 2, 3, 4 };
 
@@ -106,14 +111,22 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         {
             if (SetProperty(ref _dataSource, value))
             {
+                StopMonitoring();
+                Samples.Clear();
+                IsFrozen = false;
                 OnPropertyChanged(nameof(IsPollingMode));
                 OnPropertyChanged(nameof(IsServerLiveMode));
+                OnPropertyChanged(nameof(SampleOnceLabel));
+                if (_dataSource == MonitorDataSource.ServerLiveListener)
+                    SampleServerRegisters();
+                ScopeUpdated?.Invoke(this, EventArgs.Empty);
             }
         }
     }
 
     public bool IsPollingMode => DataSource == MonitorDataSource.ModbusPolling;
     public bool IsServerLiveMode => DataSource == MonitorDataSource.ServerLiveListener;
+    public string SampleOnceLabel => IsServerLiveMode ? "采集一帧" : "读取一次";
 
     private MonitorViewLayout _viewLayout = MonitorViewLayout.Split;
     public MonitorViewLayout ViewLayout
@@ -151,16 +164,18 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 else if (DataType == RegisterDataType.Bool)
                     DataType = RegisterDataType.UInt16;
                 OnPropertyChanged(nameof(IsBitFunction));
+                OnPropertyChanged(nameof(IsRegisterFunction));
             }
         }
     }
 
     public bool IsBitFunction => FunctionCode is 1 or 2;
+    public bool IsRegisterFunction => !IsBitFunction;
 
     private ushort _startAddress;
     public ushort StartAddress { get => _startAddress; set => SetProperty(ref _startAddress, value); }
 
-    private ushort _quantity = 4;
+    private ushort _quantity = 6;
     public ushort Quantity { get => _quantity; set => SetProperty(ref _quantity, value); }
 
     private RegisterDataType _dataType = RegisterDataType.UInt16;
@@ -184,27 +199,22 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     }
 
     private bool _isMonitoring;
-    public bool IsMonitoring
-    {
-        get => _isMonitoring;
-        private set => SetProperty(ref _isMonitoring, value);
-    }
+    public bool IsMonitoring { get => _isMonitoring; private set => SetProperty(ref _isMonitoring, value); }
 
     private bool _isFrozen;
-    public bool IsFrozen
-    {
-        get => _isFrozen;
-        set => SetProperty(ref _isFrozen, value);
-    }
+    public bool IsFrozen { get => _isFrozen; set => SetProperty(ref _isFrozen, value); }
 
-    private int _timeWindowSec = 30;
+    private int _timeWindowSec = 60;
     public int TimeWindowSec
     {
         get => _timeWindowSec;
         set
         {
             if (SetProperty(ref _timeWindowSec, value))
+            {
+                RefreshChannelTelemetry();
                 ScopeUpdated?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 
@@ -215,15 +225,23 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _autoScaleY, value))
+            {
+                OnPropertyChanged(nameof(IsManualY));
                 ScopeUpdated?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
+
+    public bool IsManualY => !AutoScaleY;
 
     private double _manualYMin;
     public double ManualYMin { get => _manualYMin; set { if (SetProperty(ref _manualYMin, value)) ScopeUpdated?.Invoke(this, EventArgs.Empty); } }
 
     private double _manualYMax = 100;
     public double ManualYMax { get => _manualYMax; set { if (SetProperty(ref _manualYMax, value)) ScopeUpdated?.Invoke(this, EventArgs.Empty); } }
+
+    private bool _showMarkers;
+    public bool ShowMarkers { get => _showMarkers; set { if (SetProperty(ref _showMarkers, value)) ScopeUpdated?.Invoke(this, EventArgs.Empty); } }
 
     private bool _triggerEnabled;
     public bool TriggerEnabled { get => _triggerEnabled; set { if (SetProperty(ref _triggerEnabled, value)) ScopeUpdated?.Invoke(this, EventArgs.Empty); } }
@@ -240,6 +258,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private string _statusMessage = "监听未启动";
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
 
+    public RelayCommand SampleOnceCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand ToggleFreezeCommand { get; }
@@ -247,11 +266,19 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     public RelayCommand ExportCsvCommand { get; }
     public RelayCommand ToggleChannelScopeCommand { get; }
 
+    public void SampleOnce()
+    {
+        if (DataSource == MonitorDataSource.ServerLiveListener)
+            SampleServerRegisters();
+        else
+            _ = OnTimerTickAsync(forceSingle: true);
+    }
+
     public void StartMonitoring()
     {
         if (DataSource == MonitorDataSource.ModbusPolling && _comm.State != ChannelState.Connected)
         {
-            StatusMessage = "错误：Modbus 轮询需要先建立连接";
+            StatusMessage = "错误：Modbus 轮询需要先在「通讯连接」建立连接";
             return;
         }
 
@@ -259,7 +286,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         _pollTimer.Start();
         IsMonitoring = true;
         StatusMessage = DataSource == MonitorDataSource.ServerLiveListener
-            ? "正在实时监听本机 Modbus 服务器内存..."
+            ? "正在实时监听内置 Modbus 服务器内存..."
             : $"正在轮询 FC{FunctionCode:D2} 地址 {StartAddress}...";
 
         if (DataSource == MonitorDataSource.ServerLiveListener)
@@ -275,9 +302,41 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         StatusMessage = "监听已停止";
     }
 
-    private async Task OnTimerTickAsync()
+    private void ToggleChannelById(string channelId)
     {
-        if (!IsMonitoring || _isPollingTick) return;
+        var row = Rows.FirstOrDefault(r => r.ChannelId == channelId);
+        bool next = row != null ? !row.IsEnabledInScope : !(_enabledOverrides.TryGetValue(channelId, out bool prev) && prev);
+        _enabledOverrides[channelId] = next;
+        if (row != null) row.IsEnabledInScope = next;
+
+        var ch = ScopeChannels.FirstOrDefault(c => c.Id == channelId);
+        if (ch != null) ch.Enabled = next;
+
+        // Refresh collection item binding cleanly
+        int rowIdx = row != null ? Rows.IndexOf(row) : -1;
+        if (rowIdx >= 0) Rows[rowIdx] = row!;
+        int chIdx = ch != null ? ScopeChannels.IndexOf(ch) : -1;
+        if (chIdx >= 0) ScopeChannels[chIdx] = ch!;
+
+        ScopeUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void UpdateRowNote(string channelId, string note)
+    {
+        _notesByKey[channelId] = note;
+        var ch = ScopeChannels.FirstOrDefault(c => c.Id == channelId);
+        var row = Rows.FirstOrDefault(r => r.ChannelId == channelId);
+        if (ch != null && row != null)
+        {
+            ch.Label = string.IsNullOrWhiteSpace(note) ? row.Label : $"{row.Label} ({note})";
+            int idx = ScopeChannels.IndexOf(ch);
+            if (idx >= 0) ScopeChannels[idx] = ch;
+        }
+    }
+
+    private async Task OnTimerTickAsync(bool forceSingle = false)
+    {
+        if ((!IsMonitoring && !forceSingle) || _isPollingTick) return;
         _isPollingTick = true;
         try
         {
@@ -289,8 +348,8 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
             if (_comm.State != ChannelState.Connected)
             {
-                StopMonitoring();
-                StatusMessage = "连接已断开，轮询停止";
+                if (IsMonitoring) StopMonitoring();
+                StatusMessage = "请先在「通讯连接」建立连接后再读取或轮询";
                 return;
             }
 
@@ -308,18 +367,21 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             if (FunctionCode is 1 or 2)
             {
                 var bits = ModbusFrame.ExtractBits(parsed.Payload, Quantity);
+                string prefix = FunctionCode == 1 ? "Coil" : "DI";
                 for (int i = 0; i < bits.Length; i++)
                 {
                     int addr = StartAddress + i;
+                    string id = $"B_{FunctionCode}_{addr}";
                     double val = bits[i] ? 1.0 : 0.0;
                     newRows.Add(new RegisterMonitorRow
                     {
-                        ChannelId = $"B_{FunctionCode}_{addr}",
-                        Label = $"Bit {addr}",
+                        ChannelId = id,
+                        Label = $"{prefix} #{addr}",
                         Address = addr,
-                        RawValue = bits[i] ? "true" : "false",
+                        RawValue = bits[i] ? "1 (true)" : "0 (false)",
                         Value = val,
                         IsDigital = true,
+                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
                         TraceColorHex = ChannelPalette[newRows.Count % ChannelPalette.Length]
                     });
                 }
@@ -331,17 +393,19 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 for (int i = 0; i + width <= parsed.Registers.Length; i += width)
                 {
                     var slice = parsed.Registers.Skip(i).Take(width).ToArray();
-                    double val = RegisterValueConverter.Convert(slice, DataType, ByteOrder, Scale);
+                    bool isBoolWord = DataType == RegisterDataType.Bool;
+                    double val = RegisterValueConverter.Convert(slice, DataType, ByteOrder, isBoolWord ? 1.0 : Scale);
                     int addr = StartAddress + i;
-                    bool isDigital = DataType == RegisterDataType.Bool;
+                    string id = $"R_{FunctionCode}_{addr}";
                     newRows.Add(new RegisterMonitorRow
                     {
-                        ChannelId = $"R_{FunctionCode}_{addr}",
-                        Label = $"Reg {addr}",
+                        ChannelId = id,
+                        Label = $"Addr {addr}",
                         Address = addr,
                         RawValue = string.Join(" ", slice.Select(r => $"0x{r:X4}")),
                         Value = val,
-                        IsDigital = isDigital,
+                        IsDigital = isBoolWord,
+                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
                         TraceColorHex = ChannelPalette[idx % ChannelPalette.Length]
                     });
                     idx++;
@@ -353,7 +417,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"轮询失败: {ex.Message}";
+            StatusMessage = $"采集失败: {ex.Message}";
         }
         finally
         {
@@ -368,6 +432,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         for (int i = 0; i < defs.Count; i++)
         {
             var d = defs[i];
+            string id = $"{d.Area}_{d.Address}";
             bool isDigital = d.Area is ServerRegisterArea.Coil or ServerRegisterArea.DiscreteInput || d.DataType == ServerRegisterDataType.Bit;
             double numeric = 0;
             if (isDigital)
@@ -375,21 +440,25 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             else
                 double.TryParse(d.CurrentValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out numeric);
 
+            string note = _notesByKey.TryGetValue(id, out var customNote) ? customNote : d.Note;
+
             newRows.Add(new RegisterMonitorRow
             {
-                ChannelId = $"{d.Area}_{d.Address}",
-                Label = $"{ShortArea(d.Area)} {d.Address}",
+                ChannelId = id,
+                Label = $"{ShortArea(d.Area)} #{d.Address}",
                 Address = d.Address,
-                RawValue = d.CurrentValue,
+                RawValue = isDigital ? (numeric >= 0.5 ? "true (1)" : "false (0)") : d.CurrentValue,
                 Value = numeric,
                 IsDigital = isDigital,
-                Note = d.Note,
+                Note = note,
                 TraceColorHex = ChannelPalette[i % ChannelPalette.Length]
             });
         }
 
         ApplySampleBatch(newRows);
-        StatusMessage = $"服务器实时监听：{newRows.Count} 通道 @ {DateTime.Now:HH:mm:ss.fff}";
+        StatusMessage = newRows.Count > 0
+            ? $"服务器实时监听：{newRows.Count} 通道 @ {DateTime.Now:HH:mm:ss.fff}"
+            : "内置服务器暂无已定义的寄存器";
     }
 
     private static string ShortArea(ServerRegisterArea area) => area switch
@@ -402,35 +471,16 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     private void ApplySampleBatch(List<RegisterMonitorRow> incoming)
     {
-        var prevEnabled = Rows.ToDictionary(r => r.ChannelId, r => r.IsEnabledInScope);
         Rows.Clear();
-        foreach (var row in incoming)
+        for (int i = 0; i < incoming.Count; i++)
         {
-            if (prevEnabled.TryGetValue(row.ChannelId, out bool enabled))
-                row.IsEnabledInScope = enabled;
+            var row = incoming[i];
+            row.OnNoteChanged = UpdateRowNote;
+            row.IsEnabledInScope = _enabledOverrides.TryGetValue(row.ChannelId, out bool enabled)
+                ? enabled
+                : i < 6;
             Rows.Add(row);
         }
-
-        // Sync ScopeChannels
-        var existingTriggerId = TriggerChannel?.Id;
-        ScopeChannels.Clear();
-        foreach (var row in Rows)
-        {
-            ScopeChannels.Add(new ScopeChannelConfig
-            {
-                Id = row.ChannelId,
-                Label = row.Label,
-                ColorHex = row.TraceColorHex,
-                Enabled = row.IsEnabledInScope,
-                IsDigital = row.IsDigital,
-                LatestText = row.DisplayValue
-            });
-        }
-
-        if (TriggerChannel == null || ScopeChannels.All(c => c.Id != existingTriggerId))
-            TriggerChannel = ScopeChannels.FirstOrDefault();
-        else
-            TriggerChannel = ScopeChannels.FirstOrDefault(c => c.Id == existingTriggerId);
 
         if (!IsFrozen && incoming.Count > 0)
         {
@@ -440,27 +490,80 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 Values = incoming.ToDictionary(r => r.ChannelId, r => r.Value)
             };
             Samples.Add(sample);
-            while (Samples.Count > _sampleCapacity)
+            while (Samples.Count > SampleCapacity)
                 Samples.RemoveAt(0);
         }
 
+        RefreshChannelTelemetry();
         ScopeUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RefreshChannelTelemetry()
+    {
+        string? existingTriggerId = TriggerChannel?.Id;
+        DateTime endTime = Samples.Count > 0 ? Samples[^1].Timestamp : DateTime.Now;
+        DateTime startTime = endTime.AddSeconds(-TimeWindowSec);
+        var windowSamples = Samples.Where(s => s.Timestamp >= startTime).ToList();
+
+        ScopeChannels.Clear();
+        foreach (var row in Rows)
+        {
+            double min = double.MaxValue;
+            double max = double.MinValue;
+            int cnt = 0;
+            foreach (var s in windowSamples)
+            {
+                if (s.Values.TryGetValue(row.ChannelId, out double v) && double.IsFinite(v))
+                {
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                    cnt++;
+                }
+            }
+
+            ScopeChannels.Add(new ScopeChannelConfig
+            {
+                Id = row.ChannelId,
+                Label = string.IsNullOrWhiteSpace(row.Note) ? row.Label : $"{row.Label} ({row.Note})",
+                ColorHex = row.TraceColorHex,
+                Enabled = row.IsEnabledInScope,
+                IsDigital = row.IsDigital,
+                LatestText = row.DisplayValue,
+                RangeText = !row.IsDigital && cnt > 0 ? $"[{min:0.##}..{max:0.##}]" : string.Empty
+            });
+        }
+
+        TriggerChannel = ScopeChannels.FirstOrDefault(c => c.Id == existingTriggerId)
+            ?? ScopeChannels.FirstOrDefault(c => c.Enabled)
+            ?? ScopeChannels.FirstOrDefault();
     }
 
     private void ExportCsv()
     {
-        if (Rows.Count == 0) return;
+        if (Samples.Count == 0 && Rows.Count == 0) return;
         var dlg = new SaveFileDialog
         {
             Filter = "CSV 文件 (*.csv)|*.csv",
-            FileName = $"register-monitor-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
+            FileName = $"modbus-oscilloscope-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
         };
         if (dlg.ShowDialog() == true)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("ChannelId,Label,Address,RawValue,NumericValue,IsDigital,Note");
-            foreach (var r in Rows)
-                sb.AppendLine($"\"{r.ChannelId}\",\"{r.Label}\",{r.Address},\"{r.RawValue}\",{r.Value},{r.IsDigital},\"{r.Note}\"");
+            if (Samples.Count > 0 && ScopeChannels.Count > 0)
+            {
+                sb.AppendLine("Timestamp," + string.Join(",", ScopeChannels.Select(c => $"\"{c.Label}\"")));
+                foreach (var s in Samples)
+                {
+                    var vals = ScopeChannels.Select(c => s.Values.TryGetValue(c.Id, out double v) ? v.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
+                    sb.AppendLine($"{s.Timestamp:O}," + string.Join(",", vals));
+                }
+            }
+            else
+            {
+                sb.AppendLine("ChannelId,Label,Address,RawValue,NumericValue,IsDigital,Note");
+                foreach (var r in Rows)
+                    sb.AppendLine($"\"{r.ChannelId}\",\"{r.Label}\",{r.Address},\"{r.RawValue}\",{r.Value},{r.IsDigital},\"{r.Note}\"");
+            }
             File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
             StatusMessage = $"已导出 CSV: {dlg.FileName}";
         }

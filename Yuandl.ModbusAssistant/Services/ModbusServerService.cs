@@ -33,11 +33,28 @@ public sealed class ModbusServerService : IDisposable
     private Task? _serialReadTask;
 
     public bool IsRunning { get; private set; }
+    public bool IsSerialLoopbackFallback { get; private set; }
     public ModbusServerTransportMode ServerMode { get; private set; } = ModbusServerTransportMode.Tcp;
     public int Port { get; private set; } = 5020;
     public int Station { get; private set; } = 1;
     public SerialPortParameters SerialParams { get; private set; } = new();
     public string StatusText { get; private set; } = "服务器已停止";
+
+    public bool IsSerialActive => IsRunning && ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
+
+    public bool IsSerialEndpointMatch(SerialPortParameters clientSerial) =>
+        IsSerialActive &&
+        string.Equals(clientSerial.PortName, SerialParams.PortName, StringComparison.OrdinalIgnoreCase) &&
+        clientSerial.BaudRate == SerialParams.BaudRate &&
+        clientSerial.DataBits == SerialParams.DataBits &&
+        clientSerial.Parity == SerialParams.Parity &&
+        clientSerial.StopBits == SerialParams.StopBits;
+
+    public byte[]? HandleSerialRequest(SerialPortParameters clientSerial, byte[] bytes)
+    {
+        if (!IsSerialEndpointMatch(clientSerial)) return null;
+        return TryBuildSerialResponse(bytes);
+    }
 
     public event EventHandler? RegistersMutated;
     public event EventHandler<string>? StatusChanged;
@@ -224,18 +241,27 @@ public sealed class ModbusServerService : IDisposable
                 _tcpAcceptTask = Task.Run(() => TcpAcceptLoopAsync(listener, _cts.Token), CancellationToken.None);
             }
 
+            IsSerialLoopbackFallback = false;
             if (needsSerial)
             {
-                var sp = new SerialPort(targetSerial.PortName, targetSerial.BaudRate, targetSerial.Parity, targetSerial.DataBits, targetSerial.StopBits)
+                try
                 {
-                    DtrEnable = targetSerial.DtrEnable,
-                    RtsEnable = targetSerial.RtsEnable,
-                    ReadTimeout = 200,
-                    WriteTimeout = 1000
-                };
-                sp.Open();
-                _serialPort = sp;
-                _serialReadTask = Task.Run(() => SerialReadLoopAsync(sp, _cts.Token), CancellationToken.None);
+                    var sp = new SerialPort(targetSerial.PortName, targetSerial.BaudRate, targetSerial.Parity, targetSerial.DataBits, targetSerial.StopBits)
+                    {
+                        DtrEnable = targetSerial.DtrEnable,
+                        RtsEnable = targetSerial.RtsEnable,
+                        ReadTimeout = 200,
+                        WriteTimeout = 1000
+                    };
+                    sp.Open();
+                    _serialPort = sp;
+                    _serialReadTask = Task.Run(() => SerialReadLoopAsync(sp, _cts.Token), CancellationToken.None);
+                }
+                catch
+                {
+                    // Physical/driver COM port not available: keep virtual in-memory serial server active for loopback debugging
+                    IsSerialLoopbackFallback = true;
+                }
             }
 
             IsRunning = true;
@@ -291,6 +317,7 @@ public sealed class ModbusServerService : IDisposable
         }
 
         IsRunning = false;
+        IsSerialLoopbackFallback = false;
         StatusText = "服务器已停止";
         StatusChanged?.Invoke(this, StatusText);
     }
@@ -298,12 +325,13 @@ public sealed class ModbusServerService : IDisposable
     private string BuildRunningStatusText()
     {
         string serialSummary = $"{SerialParams.PortName} ({SerialParams.BaudRate},{SerialParams.DataBits},{SerialParams.Parity},{SerialParams.StopBits})";
+        string serialModeTag = IsSerialLoopbackFallback ? "内联仿真串口" : "串口";
         int count = _definitions.Count;
         return ServerMode switch
         {
-            ModbusServerTransportMode.SerialRtu => $"运行中：串口 RTU {serialSummary}，站号 {Station}，数据定义 {count} 项",
-            ModbusServerTransportMode.SerialAscii => $"运行中：串口 ASCII {serialSummary}，站号 {Station}，数据定义 {count} 项",
-            ModbusServerTransportMode.TcpAndSerial => $"运行中：TCP {Port} + 串口 {serialSummary}，站号 {Station}，数据定义 {count} 项",
+            ModbusServerTransportMode.SerialRtu => $"运行中：{serialModeTag} RTU {serialSummary}，站号 {Station}，数据定义 {count} 项",
+            ModbusServerTransportMode.SerialAscii => $"运行中：{serialModeTag} ASCII {serialSummary}，站号 {Station}，数据定义 {count} 项",
+            ModbusServerTransportMode.TcpAndSerial => $"运行中：TCP {Port} + {serialModeTag} {serialSummary}，站号 {Station}，数据定义 {count} 项",
             _ => $"运行中：TCP 端口 {Port}，站号 {Station}，数据定义 {count} 项"
         };
     }
