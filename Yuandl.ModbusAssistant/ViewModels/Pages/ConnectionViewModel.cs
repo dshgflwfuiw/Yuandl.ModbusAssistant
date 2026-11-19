@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.IO.Ports;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Windows;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
@@ -63,6 +66,12 @@ public sealed class ConnectionViewModel : ObservableObject
         _persistence = persistence;
 
         RefreshPorts();
+        RefreshLocalIpAddresses();
+        TcpServer.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TcpServer.ListenPort))
+                RefreshLocalIpAddresses();
+        };
         LoadSavedServerConfig();
 
         _comm.StateChanged += (_, s) => RunOnUi(() =>
@@ -83,6 +92,7 @@ public sealed class ConnectionViewModel : ObservableObject
         });
 
         RefreshPortsCommand = new RelayCommand(RefreshPorts);
+        RefreshLocalIpAddressesCommand = new RelayCommand(RefreshLocalIpAddresses);
         ConnectCommand = new AsyncRelayCommand(ConnectAsync);
         DisconnectCommand = new AsyncRelayCommand(() => _comm.DisconnectAsync());
         KickClientCommand = new RelayCommand(p =>
@@ -94,6 +104,7 @@ public sealed class ConnectionViewModel : ObservableObject
         StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync);
         StopServerCommand = new AsyncRelayCommand(() => _server.StopAsync());
         AddRegisterCommand = new RelayCommand(AddRegisterDefinition);
+        AddRegisterBatchCommand = new RelayCommand(AddRegisterDefinitionsBatch);
         DeleteRegisterCommand = new RelayCommand(p =>
         {
             if (p is ServerRegisterRowViewModel row)
@@ -145,7 +156,11 @@ public sealed class ConnectionViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _selectedType, value))
+            {
                 NotifyVisibilityProperties();
+                if (IsTcpServerSelected)
+                    RefreshLocalIpAddresses();
+            }
         }
     }
 
@@ -165,6 +180,13 @@ public sealed class ConnectionViewModel : ObservableObject
     public bool IsTcpClientSelected => SelectedType == CommunicationType.TcpClient;
     public bool IsUdpSelected => SelectedType == CommunicationType.Udp;
     public bool IsTcpServerSelected => SelectedType == CommunicationType.TcpServer;
+
+    private string _localIpAddressesText = "未检测到可用 IPv4 地址";
+    public string LocalIpAddressesText
+    {
+        get => _localIpAddressesText;
+        private set => SetProperty(ref _localIpAddressesText, value);
+    }
 
     private string _connectionError = string.Empty;
     public string ConnectionError
@@ -246,6 +268,13 @@ public sealed class ConnectionViewModel : ObservableObject
     private int _newAddress;
     public int NewAddress { get => _newAddress; set => SetProperty(ref _newAddress, value); }
 
+    private int _newRegisterCount = 10;
+    public int NewRegisterCount
+    {
+        get => _newRegisterCount;
+        set => SetProperty(ref _newRegisterCount, Math.Clamp(value, 1, 1000));
+    }
+
     private ServerRegisterDataType _newDataType = ServerRegisterDataType.UInt16;
     public ServerRegisterDataType NewDataType { get => _newDataType; set => SetProperty(ref _newDataType, value); }
 
@@ -259,18 +288,73 @@ public sealed class ConnectionViewModel : ObservableObject
     public string NewNote { get => _newNote; set => SetProperty(ref _newNote, value); }
 
     public RelayCommand RefreshPortsCommand { get; }
+    public RelayCommand RefreshLocalIpAddressesCommand { get; }
     public AsyncRelayCommand ConnectCommand { get; }
     public AsyncRelayCommand DisconnectCommand { get; }
     public RelayCommand KickClientCommand { get; }
     public AsyncRelayCommand StartServerCommand { get; }
     public AsyncRelayCommand StopServerCommand { get; }
     public RelayCommand AddRegisterCommand { get; }
+    public RelayCommand AddRegisterBatchCommand { get; }
     public RelayCommand DeleteRegisterCommand { get; }
     public RelayCommand ApplyRuntimeValueCommand { get; }
     public RelayCommand ToggleBitRuntimeCommand { get; }
     public RelayCommand ResetRegistersCommand { get; }
     public RelayCommand ExportConfigCommand { get; }
     public RelayCommand ImportConfigCommand { get; }
+
+    public void RefreshLocalIpAddresses()
+    {
+        var adapters = new List<string>();
+        var readErrors = new List<string>();
+
+        try
+        {
+            foreach (var network in NetworkInterface.GetAllNetworkInterfaces()
+                .Where(network => network.NetworkInterfaceType != NetworkInterfaceType.Loopback))
+            {
+                try
+                {
+                    var addresses = network.GetIPProperties().UnicastAddresses
+                        .Select(address => address.Address)
+                        .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
+                        .Distinct()
+                        .OrderBy(address => address.ToString(), StringComparer.Ordinal)
+                        .Select(address => $"{address}:{TcpServer.ListenPort}")
+                        .ToArray();
+
+                    if (addresses.Length > 0)
+                    {
+                        string status = network.OperationalStatus switch
+                        {
+                            OperationalStatus.Up => "已连接",
+                            OperationalStatus.Down => "未连接",
+                            OperationalStatus.Dormant => "等待连接",
+                            _ => network.OperationalStatus.ToString()
+                        };
+                        adapters.Add($"{network.Name} · {network.Description}（{status}）：{string.Join(", ", addresses)}");
+                    }
+                }
+                catch (NetworkInformationException ex)
+                {
+                    readErrors.Add($"{network.Name}: {ex.Message}");
+                }
+            }
+        }
+        catch (NetworkInformationException ex)
+        {
+            LocalIpAddressesText = $"读取网卡信息失败：{ex.Message}";
+            return;
+        }
+
+        var result = adapters.Count > 0
+            ? string.Join(Environment.NewLine, adapters)
+            : "未发现已分配 IPv4 的网卡（请检查 USB 网卡是否启用并已配置 IP）";
+        if (readErrors.Count > 0)
+            result += Environment.NewLine + "部分网卡读取失败：" + string.Join("；", readErrors);
+
+        LocalIpAddressesText = result;
+    }
 
     public void RefreshPorts()
     {
@@ -369,6 +453,47 @@ public sealed class ConnectionViewModel : ObservableObject
         catch (Exception ex)
         {
             ServerBanner = $"定义错误: {ex.Message}";
+        }
+    }
+
+    private void AddRegisterDefinitionsBatch()
+    {
+        ServerBanner = string.Empty;
+        try
+        {
+            var all = ServerRegisters.Select(r => r.ToModel()).ToList();
+            int address = NewAddress;
+            int width = ServerRegisterCodec.GetWidth(NewDataType);
+
+            for (int i = 0; i < NewRegisterCount; i++)
+            {
+                var candidate = new ServerRegisterDefinition
+                {
+                    Area = NewArea,
+                    Address = address,
+                    DataType = NewDataType,
+                    ByteOrder = NewByteOrder,
+                    InitialValue = NewInitialValue,
+                    CurrentValue = NewInitialValue,
+                    Note = string.IsNullOrWhiteSpace(NewNote) ? string.Empty : $"{NewNote.Trim()} {i + 1}"
+                };
+
+                ServerRegisterCodec.Validate(candidate);
+                all.Add(candidate);
+                address = checked(address + width);
+            }
+
+            ServerRegisterCodec.ValidateNoOverlap(all);
+            _server.ConfigureRegisters(all);
+            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+            SaveServerConfig();
+            NewAddress = address;
+            NewNote = string.Empty;
+            ServerBanner = $"已批量添加 {NewRegisterCount} 条数据定义并同步到服务器内存";
+        }
+        catch (Exception ex)
+        {
+            ServerBanner = $"批量定义错误: {ex.Message}";
         }
     }
 

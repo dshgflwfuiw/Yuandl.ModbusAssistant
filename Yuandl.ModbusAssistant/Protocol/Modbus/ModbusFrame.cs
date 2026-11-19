@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;

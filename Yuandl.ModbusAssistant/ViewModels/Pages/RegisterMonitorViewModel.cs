@@ -30,6 +30,50 @@ public enum TriggerEdgeMode
     Falling
 }
 
+public sealed class MonitorPollingData
+{
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public byte FunctionCode { get; init; }
+    public ushort StartAddress { get; init; }
+    public ushort Quantity { get; init; }
+    public RegisterDataType DataType { get; init; }
+    public RegisterByteOrder ByteOrder { get; init; }
+    public double Scale { get; init; }
+    public string DisplayName => $"FC{FunctionCode:D2} · 地址 {StartAddress} · 数量 {Quantity}";
+}
+
+public sealed class MonitorPollingGroup : ObservableObject
+{
+    private string _name = string.Empty;
+    private ModbusTransport _transport = ModbusTransport.Tcp;
+    private byte _unitId = 1;
+    private byte _functionCode = 3;
+    private ushort _startAddress;
+    private ushort _quantity = 6;
+    private RegisterDataType _dataType = RegisterDataType.UInt16;
+    private RegisterByteOrder _byteOrder = RegisterByteOrder.BigEndian;
+    private double _scale = 1.0;
+    private int _intervalMs = 500;
+    private bool _isEnabled = true;
+    private string _lastStatus = "等待采集";
+
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public string Name { get => _name; set => SetProperty(ref _name, value); }
+    public ModbusTransport Transport { get => _transport; set => SetProperty(ref _transport, value); }
+    public byte UnitId { get => _unitId; set => SetProperty(ref _unitId, value); }
+    public byte FunctionCode { get => _functionCode; set => SetProperty(ref _functionCode, value); }
+    public ushort StartAddress { get => _startAddress; set => SetProperty(ref _startAddress, value); }
+    public ushort Quantity { get => _quantity; set => SetProperty(ref _quantity, value); }
+    public RegisterDataType DataType { get => _dataType; set => SetProperty(ref _dataType, value); }
+    public RegisterByteOrder ByteOrder { get => _byteOrder; set => SetProperty(ref _byteOrder, value); }
+    public double Scale { get => _scale; set => SetProperty(ref _scale, value); }
+    public int IntervalMs { get => _intervalMs; set => SetProperty(ref _intervalMs, Math.Clamp(value, 100, 10000)); }
+    public bool IsEnabled { get => _isEnabled; set => SetProperty(ref _isEnabled, value); }
+    public string LastStatus { get => _lastStatus; set => SetProperty(ref _lastStatus, value); }
+    public ObservableCollection<MonitorPollingData> DataItems { get; } = new();
+    public DateTime NextPollAt { get; set; }
+}
+
 public sealed class RegisterMonitorViewModel : ObservableObject
 {
     private static readonly string[] ChannelPalette =
@@ -43,7 +87,9 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private readonly DispatcherTimer _pollTimer;
     private readonly Dictionary<string, string> _notesByKey = new();
     private readonly Dictionary<string, bool> _enabledOverrides = new();
+    private readonly Dictionary<string, List<RegisterMonitorRow>> _latestRowsByGroup = new();
     private bool _isPollingTick;
+    private bool _isLoadingGroup;
     private const int SampleCapacity = 600;
 
     public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server)
@@ -51,7 +97,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         _comm = comm;
         _server = server;
 
-        _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _pollTimer.Tick += async (_, _) => await OnTimerTickAsync();
 
         _server.RegistersMutated += (_, _) => RunOnUi(() =>
@@ -63,6 +109,14 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         SampleOnceCommand = new RelayCommand(SampleOnce);
         StartCommand = new RelayCommand(StartMonitoring);
         StopCommand = new RelayCommand(StopMonitoring);
+        AddPollingGroupCommand = new RelayCommand(AddPollingGroup);
+        RemovePollingGroupCommand = new RelayCommand(RemoveSelectedPollingGroup, () => SelectedPollingGroup != null);
+        AddPollingDataCommand = new RelayCommand(AddPollingData, () => SelectedPollingGroup != null);
+        RemovePollingDataCommand = new RelayCommand(RemovePollingData);
+        var initialGroup = CreatePollingGroup("采集组 1");
+        PollingGroups.Add(initialGroup);
+        SelectedPollingGroup = initialGroup;
+        AddPollingData();
         ToggleFreezeCommand = new RelayCommand(() =>
         {
             IsFrozen = !IsFrozen;
@@ -90,7 +144,23 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     public ObservableCollection<RegisterMonitorRow> Rows { get; } = new();
     public ObservableCollection<ScopeChannelConfig> ScopeChannels { get; } = new();
+    public ObservableCollection<MonitorPollingGroup> PollingGroups { get; } = new();
     public List<ScopeSample> Samples { get; } = new();
+
+    private MonitorPollingGroup? _selectedPollingGroup;
+    public MonitorPollingGroup? SelectedPollingGroup
+    {
+        get => _selectedPollingGroup;
+        set
+        {
+            if (SetProperty(ref _selectedPollingGroup, value))
+            {
+                LoadSelectedPollingGroup();
+                RemovePollingGroupCommand?.RaiseCanExecuteChanged();
+                AddPollingDataCommand?.RaiseCanExecuteChanged();
+            }
+        }
+    }
 
     public event EventHandler? ScopeUpdated;
 
@@ -113,6 +183,9 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             {
                 StopMonitoring();
                 Samples.Clear();
+                _latestRowsByGroup.Clear();
+                Rows.Clear();
+                ScopeChannels.Clear();
                 IsFrozen = false;
                 OnPropertyChanged(nameof(IsPollingMode));
                 OnPropertyChanged(nameof(IsServerLiveMode));
@@ -126,7 +199,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     public bool IsPollingMode => DataSource == MonitorDataSource.ModbusPolling;
     public bool IsServerLiveMode => DataSource == MonitorDataSource.ServerLiveListener;
-    public string SampleOnceLabel => IsServerLiveMode ? "采集一帧" : "读取一次";
+    public string SampleOnceLabel => IsServerLiveMode ? "采集一帧" : "采集所有启用组";
 
     private MonitorViewLayout _viewLayout = MonitorViewLayout.Split;
     public MonitorViewLayout ViewLayout
@@ -138,18 +211,28 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowScope));
                 OnPropertyChanged(nameof(ShowTable));
+                OnPropertyChanged(nameof(ScopeRowHeight));
+                OnPropertyChanged(nameof(ScopeTableSplitterHeight));
+                OnPropertyChanged(nameof(TableRowHeight));
             }
         }
     }
 
     public bool ShowScope => ViewLayout is MonitorViewLayout.Split or MonitorViewLayout.ScopeOnly;
     public bool ShowTable => ViewLayout is MonitorViewLayout.Split or MonitorViewLayout.TableOnly;
+    public GridLength ScopeRowHeight => ViewLayout == MonitorViewLayout.TableOnly ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+    public GridLength ScopeTableSplitterHeight => ViewLayout == MonitorViewLayout.Split ? new GridLength(6) : new GridLength(0);
+    public GridLength TableRowHeight => ViewLayout == MonitorViewLayout.ScopeOnly
+        ? new GridLength(0)
+        : ViewLayout == MonitorViewLayout.TableOnly
+            ? new GridLength(1, GridUnitType.Star)
+            : new GridLength(120);
 
     private ModbusTransport _transport = ModbusTransport.Tcp;
-    public ModbusTransport Transport { get => _transport; set => SetProperty(ref _transport, value); }
+    public ModbusTransport Transport { get => _transport; set { if (SetProperty(ref _transport, value)) UpdateSelectedGroup(g => g.Transport = value); } }
 
     private byte _unitId = 1;
-    public byte UnitId { get => _unitId; set => SetProperty(ref _unitId, value); }
+    public byte UnitId { get => _unitId; set { if (SetProperty(ref _unitId, value)) UpdateSelectedGroup(g => g.UnitId = value); } }
 
     private byte _functionCode = 3;
     public byte FunctionCode
@@ -165,6 +248,11 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                     DataType = RegisterDataType.UInt16;
                 OnPropertyChanged(nameof(IsBitFunction));
                 OnPropertyChanged(nameof(IsRegisterFunction));
+                UpdateSelectedGroup(g =>
+                {
+                    g.FunctionCode = value;
+                    g.DataType = DataType;
+                });
             }
         }
     }
@@ -173,19 +261,19 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     public bool IsRegisterFunction => !IsBitFunction;
 
     private ushort _startAddress;
-    public ushort StartAddress { get => _startAddress; set => SetProperty(ref _startAddress, value); }
+    public ushort StartAddress { get => _startAddress; set { if (SetProperty(ref _startAddress, value)) UpdateSelectedGroup(g => g.StartAddress = value); } }
 
     private ushort _quantity = 6;
-    public ushort Quantity { get => _quantity; set => SetProperty(ref _quantity, value); }
+    public ushort Quantity { get => _quantity; set { if (SetProperty(ref _quantity, value)) UpdateSelectedGroup(g => g.Quantity = value); } }
 
     private RegisterDataType _dataType = RegisterDataType.UInt16;
-    public RegisterDataType DataType { get => _dataType; set => SetProperty(ref _dataType, value); }
+    public RegisterDataType DataType { get => _dataType; set { if (SetProperty(ref _dataType, value)) UpdateSelectedGroup(g => g.DataType = value); } }
 
     private RegisterByteOrder _byteOrder = RegisterByteOrder.BigEndian;
-    public RegisterByteOrder ByteOrder { get => _byteOrder; set => SetProperty(ref _byteOrder, value); }
+    public RegisterByteOrder ByteOrder { get => _byteOrder; set { if (SetProperty(ref _byteOrder, value)) UpdateSelectedGroup(g => g.ByteOrder = value); } }
 
     private double _scale = 1.0;
-    public double Scale { get => _scale; set => SetProperty(ref _scale, value); }
+    public double Scale { get => _scale; set { if (SetProperty(ref _scale, value)) UpdateSelectedGroup(g => g.Scale = value); } }
 
     private int _intervalMs = 500;
     public int IntervalMs
@@ -194,7 +282,11 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _intervalMs, Math.Clamp(value, 100, 10000)))
-                _pollTimer.Interval = TimeSpan.FromMilliseconds(_intervalMs);
+            {
+                UpdateSelectedGroup(g => g.IntervalMs = _intervalMs);
+                if (IsMonitoring && IsServerLiveMode)
+                    _pollTimer.Interval = TimeSpan.FromMilliseconds(_intervalMs);
+            }
         }
     }
 
@@ -261,10 +353,120 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     public RelayCommand SampleOnceCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
+    public RelayCommand AddPollingGroupCommand { get; }
+    public RelayCommand RemovePollingGroupCommand { get; }
+    public RelayCommand AddPollingDataCommand { get; }
+    public RelayCommand RemovePollingDataCommand { get; }
     public RelayCommand ToggleFreezeCommand { get; }
     public RelayCommand ClearScopeCommand { get; }
     public RelayCommand ExportCsvCommand { get; }
     public RelayCommand ToggleChannelScopeCommand { get; }
+
+    private MonitorPollingGroup CreatePollingGroup(string name) => new()
+    {
+        Name = name,
+        Transport = Transport,
+        UnitId = UnitId,
+        FunctionCode = FunctionCode,
+        StartAddress = StartAddress,
+        Quantity = Quantity,
+        DataType = DataType,
+        ByteOrder = ByteOrder,
+        Scale = Scale,
+        IntervalMs = IntervalMs
+    };
+
+    private void UpdateSelectedGroup(Action<MonitorPollingGroup> update)
+    {
+        if (!_isLoadingGroup && SelectedPollingGroup is { } group)
+            update(group);
+    }
+
+    private void LoadSelectedPollingGroup()
+    {
+        if (SelectedPollingGroup is not { } group) return;
+
+        _isLoadingGroup = true;
+        Transport = group.Transport;
+        UnitId = group.UnitId;
+        FunctionCode = group.FunctionCode;
+        StartAddress = group.StartAddress;
+        Quantity = group.Quantity;
+        DataType = group.DataType;
+        ByteOrder = group.ByteOrder;
+        Scale = group.Scale;
+        IntervalMs = group.IntervalMs;
+        _isLoadingGroup = false;
+        OnPropertyChanged(nameof(IsBitFunction));
+        OnPropertyChanged(nameof(IsRegisterFunction));
+    }
+
+    private void AddPollingGroup()
+    {
+        int index = 1;
+        while (PollingGroups.Any(g => g.Name == $"采集组 {index}")) index++;
+        var group = CreatePollingGroup($"采集组 {index}");
+        group.DataItems.Clear();
+        PollingGroups.Add(group);
+        SelectedPollingGroup = group;
+        StatusMessage = $"已添加 {group.Name}，配置地址范围后点击“添加数据到当前组”";
+    }
+
+    private void AddPollingData()
+    {
+        if (SelectedPollingGroup is not { } group) return;
+
+        var item = new MonitorPollingData
+        {
+            FunctionCode = FunctionCode,
+            StartAddress = StartAddress,
+            Quantity = Quantity,
+            DataType = DataType,
+            ByteOrder = ByteOrder,
+            Scale = Scale
+        };
+        group.DataItems.Add(item);
+        StatusMessage = $"已将 {item.DisplayName} 添加到 {group.Name}";
+    }
+
+    private void RemovePollingData(object? parameter)
+    {
+        if (SelectedPollingGroup is not { } group || parameter is not MonitorPollingData item) return;
+        group.DataItems.Remove(item);
+        string channelPrefix = $"{group.Id}_{item.Id}_";
+        if (_latestRowsByGroup.TryGetValue(group.Id, out var groupRows))
+        {
+            groupRows.RemoveAll(row => row.ChannelId.StartsWith(channelPrefix, StringComparison.Ordinal));
+            foreach (var sample in Samples)
+            {
+                foreach (string channelId in sample.Values.Keys.Where(id => id.StartsWith(channelPrefix, StringComparison.Ordinal)).ToList())
+                    sample.Values.Remove(channelId);
+            }
+        }
+        RebuildRowsFromLatestGroups();
+        StatusMessage = $"已从 {group.Name} 移除 {item.DisplayName}";
+    }
+
+    private void RemoveSelectedPollingGroup()
+    {
+        if (SelectedPollingGroup is not { } group) return;
+        PollingGroups.Remove(group);
+        _latestRowsByGroup.Remove(group.Id);
+        foreach (var sample in Samples)
+        {
+            foreach (var row in Rows.Where(r => r.ChannelId.StartsWith($"{group.Id}_", StringComparison.Ordinal)))
+                sample.Values.Remove(row.ChannelId);
+        }
+
+        SelectedPollingGroup = PollingGroups.FirstOrDefault();
+        RebuildRowsFromLatestGroups();
+        StatusMessage = $"已删除 {group.Name}";
+    }
+
+    private void RebuildRowsFromLatestGroups()
+    {
+        ApplySampleBatch(_latestRowsByGroup.Values.SelectMany(rows => rows).ToList());
+    }
 
     public void SampleOnce()
     {
@@ -282,12 +484,22 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             return;
         }
 
-        _pollTimer.Interval = TimeSpan.FromMilliseconds(Math.Clamp(IntervalMs, 100, 10000));
+        if (DataSource == MonitorDataSource.ModbusPolling && !PollingGroups.Any(g => g.IsEnabled && g.DataItems.Count > 0))
+        {
+            StatusMessage = "请至少在一个已启用的采集组中添加数据";
+            return;
+        }
+
+        foreach (var group in PollingGroups.Where(g => g.IsEnabled && g.DataItems.Count > 0))
+            group.NextPollAt = DateTime.MinValue;
+        _pollTimer.Interval = DataSource == MonitorDataSource.ServerLiveListener
+            ? TimeSpan.FromMilliseconds(Math.Clamp(IntervalMs, 100, 10000))
+            : TimeSpan.FromMilliseconds(100);
         _pollTimer.Start();
         IsMonitoring = true;
         StatusMessage = DataSource == MonitorDataSource.ServerLiveListener
             ? "正在实时监听内置 Modbus 服务器内存..."
-            : $"正在轮询 FC{FunctionCode:D2} 地址 {StartAddress}...";
+            : $"正在轮询 {PollingGroups.Count(g => g.IsEnabled)} 个采集组...";
 
         if (DataSource == MonitorDataSource.ServerLiveListener)
             SampleServerRegisters();
@@ -353,67 +565,41 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 return;
             }
 
-            var req = ModbusFrame.BuildRequest(UnitId, FunctionCode, StartAddress, Quantity, Transport);
-            var resp = await _comm.ExchangeModbusAsync(req, Transport, 1000, 0);
-            var parsed = ModbusFrame.ParseResponse(resp, Transport);
-
-            if (parsed.IsException)
+            DateTime now = DateTime.Now;
+            var dueGroups = PollingGroups
+                .Where(g => g.IsEnabled && g.DataItems.Count > 0 && (forceSingle || g.NextPollAt <= now))
+                .ToList();
+            if (dueGroups.Count == 0)
             {
-                StatusMessage = $"轮询异常: {ModbusException.Describe(parsed.ExceptionCode ?? 0)}";
+                if (forceSingle) StatusMessage = "请先在已启用的采集组中添加数据";
                 return;
             }
 
-            var newRows = new List<RegisterMonitorRow>();
-            if (FunctionCode is 1 or 2)
+            int successfulGroups = 0;
+            int channelCount = 0;
+            foreach (var group in dueGroups)
             {
-                var bits = ModbusFrame.ExtractBits(parsed.Payload, Quantity);
-                string prefix = FunctionCode == 1 ? "Coil" : "DI";
-                for (int i = 0; i < bits.Length; i++)
+                try
                 {
-                    int addr = StartAddress + i;
-                    string id = $"B_{FunctionCode}_{addr}";
-                    double val = bits[i] ? 1.0 : 0.0;
-                    newRows.Add(new RegisterMonitorRow
-                    {
-                        ChannelId = id,
-                        Label = $"{prefix} #{addr}",
-                        Address = addr,
-                        RawValue = bits[i] ? "1 (true)" : "0 (false)",
-                        Value = val,
-                        IsDigital = true,
-                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
-                        TraceColorHex = ChannelPalette[newRows.Count % ChannelPalette.Length]
-                    });
+                    var newRows = await ReadPollingGroupAsync(group);
+                    _latestRowsByGroup[group.Id] = newRows;
+                    group.LastStatus = $"正常 · {DateTime.Now:HH:mm:ss}";
+                    successfulGroups++;
+                    channelCount += newRows.Count;
                 }
-            }
-            else
-            {
-                int width = RegisterValueConverter.GetWidth(DataType);
-                int idx = 0;
-                for (int i = 0; i + width <= parsed.Registers.Length; i += width)
+                catch (Exception ex)
                 {
-                    var slice = parsed.Registers.Skip(i).Take(width).ToArray();
-                    bool isBoolWord = DataType == RegisterDataType.Bool;
-                    double val = RegisterValueConverter.Convert(slice, DataType, ByteOrder, isBoolWord ? 1.0 : Scale);
-                    int addr = StartAddress + i;
-                    string id = $"R_{FunctionCode}_{addr}";
-                    newRows.Add(new RegisterMonitorRow
-                    {
-                        ChannelId = id,
-                        Label = $"Addr {addr}",
-                        Address = addr,
-                        RawValue = string.Join(" ", slice.Select(r => $"0x{r:X4}")),
-                        Value = val,
-                        IsDigital = isBoolWord,
-                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
-                        TraceColorHex = ChannelPalette[idx % ChannelPalette.Length]
-                    });
-                    idx++;
+                    group.LastStatus = $"失败 · {ex.Message}";
+                }
+                finally
+                {
+                    if (IsMonitoring && !forceSingle)
+                        group.NextPollAt = DateTime.Now.AddMilliseconds(group.IntervalMs);
                 }
             }
 
-            ApplySampleBatch(newRows);
-            StatusMessage = $"采样成功 ({newRows.Count} 通道) @ {DateTime.Now:HH:mm:ss.fff}";
+            ApplySampleBatch(_latestRowsByGroup.Values.SelectMany(rows => rows).ToList());
+            StatusMessage = $"采集完成：{successfulGroups}/{dueGroups.Count} 组成功，共 {channelCount} 个通道 @ {DateTime.Now:HH:mm:ss.fff}";
         }
         catch (Exception ex)
         {
@@ -423,6 +609,76 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         {
             _isPollingTick = false;
         }
+    }
+
+    private async Task<List<RegisterMonitorRow>> ReadPollingGroupAsync(MonitorPollingGroup group)
+    {
+        string groupId = group.Id;
+        string groupName = group.Name;
+        var transport = group.Transport;
+        byte unitId = group.UnitId;
+        int paletteOffset = Math.Max(0, PollingGroups.IndexOf(group)) * 3;
+        var rows = new List<RegisterMonitorRow>();
+
+        foreach (var item in group.DataItems.ToList())
+        {
+            var req = ModbusFrame.BuildRequest(unitId, item.FunctionCode, item.StartAddress, item.Quantity, transport);
+            var resp = await _comm.ExchangeModbusAsync(req, transport, 1000, 0);
+            if (!PollingGroups.Contains(group) || !group.DataItems.Contains(item))
+                continue;
+            var parsed = ModbusFrame.ParseResponse(resp, transport);
+            if (parsed.IsException)
+                throw new InvalidOperationException($"{item.DisplayName}: {ModbusException.Describe(parsed.ExceptionCode ?? 0)}");
+
+            int itemColorOffset = group.DataItems.IndexOf(item) * 2;
+            if (item.FunctionCode is 1 or 2)
+            {
+                var bits = ModbusFrame.ExtractBits(parsed.Payload, item.Quantity);
+                string prefix = item.FunctionCode == 1 ? "Coil" : "DI";
+                for (int i = 0; i < bits.Length; i++)
+                {
+                    int address = item.StartAddress + i;
+                    string id = $"{groupId}_{item.Id}_B_{item.FunctionCode}_{address}";
+                    double value = bits[i] ? 1.0 : 0.0;
+                    rows.Add(new RegisterMonitorRow
+                    {
+                        ChannelId = id,
+                        Label = $"{groupName} · {prefix} #{address}",
+                        Address = address,
+                        RawValue = bits[i] ? "1 (true)" : "0 (false)",
+                        Value = value,
+                        IsDigital = true,
+                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
+                        TraceColorHex = ChannelPalette[(paletteOffset + itemColorOffset + rows.Count) % ChannelPalette.Length]
+                    });
+                }
+            }
+            else
+            {
+                int width = RegisterValueConverter.GetWidth(item.DataType);
+                for (int i = 0; i + width <= parsed.Registers.Length; i += width)
+                {
+                    var slice = parsed.Registers.Skip(i).Take(width).ToArray();
+                    bool isBoolWord = item.DataType == RegisterDataType.Bool;
+                    double value = RegisterValueConverter.Convert(slice, item.DataType, item.ByteOrder, isBoolWord ? 1.0 : item.Scale);
+                    int address = item.StartAddress + i;
+                    string id = $"{groupId}_{item.Id}_R_{item.FunctionCode}_{address}";
+                    rows.Add(new RegisterMonitorRow
+                    {
+                        ChannelId = id,
+                        Label = $"{groupName} · Addr {address}",
+                        Address = address,
+                        RawValue = string.Join(" ", slice.Select(r => $"0x{r:X4}")),
+                        Value = value,
+                        IsDigital = isBoolWord,
+                        Note = _notesByKey.GetValueOrDefault(id, string.Empty),
+                        TraceColorHex = ChannelPalette[(paletteOffset + itemColorOffset + rows.Count) % ChannelPalette.Length]
+                    });
+                }
+            }
+        }
+
+        return rows;
     }
 
     private void SampleServerRegisters()

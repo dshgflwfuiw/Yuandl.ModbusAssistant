@@ -28,14 +28,34 @@ public sealed class SettingsViewModel : ObservableObject
         {
             if (SetProperty(ref _isDarkTheme, value))
             {
+                OnPropertyChanged(nameof(ThemeMode));
                 SaveSettings();
                 ThemeChanged?.Invoke(this, value);
             }
         }
     }
 
+    public string ThemeMode
+    {
+        get => IsDarkTheme ? "深色模式 (Dark)" : "浅色模式 (Light)";
+        set
+        {
+            bool isDark = value == "深色模式 (Dark)";
+            if (IsDarkTheme != isDark)
+                IsDarkTheme = isDark;
+        }
+    }
+
     private int _defaultTimeoutMs = 1000;
-    public int DefaultTimeoutMs { get => _defaultTimeoutMs; set => SetProperty(ref _defaultTimeoutMs, value); }
+    public int DefaultTimeoutMs
+    {
+        get => _defaultTimeoutMs;
+        set
+        {
+            if (SetProperty(ref _defaultTimeoutMs, value))
+                SaveSettings();
+        }
+    }
 
     private int _defaultRetryTimes = 2;
     public int DefaultRetryTimes { get => _defaultRetryTimes; set => SetProperty(ref _defaultRetryTimes, value); }

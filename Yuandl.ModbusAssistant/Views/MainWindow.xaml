@@ -3,17 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Yuandl.ModbusAssistant.Controls"
         Title="Yuandl.ModbusAssistant — 工业协议与 Modbus 调试工作站 (.NET 8 WPF)"
-        Width="1380"
-        Height="880"
-        MinWidth="1100"
-        MinHeight="720"
+        Width="1280"
+        Height="800"
+        MinWidth="980"
+        MinHeight="640"
         WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI"
         Background="{DynamicResource BgCanvasBrush}"
         Foreground="{DynamicResource TextPrimaryBrush}">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
-            <RowDefinition Height="32" />
+            <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
         <!-- Main Workspace with Left Navigation Rail -->
@@ -23,9 +24,83 @@
                     Background="{DynamicResource BgCanvasBrush}"
                     BorderThickness="0">
             <TabControl.Resources>
+                <Style TargetType="TabControl">
+                    <Setter Property="TabStripPlacement" Value="Left" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="TabControl">
+                                <Grid Background="{TemplateBinding Background}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NavigationWidthConverter}}" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Background="{DynamicResource BgSidebarBrush}"
+                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                            BorderThickness="0,0,1,0">
+                                        <Grid Margin="14,20,14,14">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid Grid.Row="0" Margin="4,0,4,24">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid Grid.Row="0" Margin="0,0,0,24">
+                                                    <Border Width="38" Height="38" CornerRadius="11" Background="{DynamicResource AccentBrush}" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                                        <TextBlock Text="M" FontSize="22" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel VerticalAlignment="Center" Margin="48,0,38,0"
+                                                                Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="YUANDL" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                        <TextBlock Text="MODBUS WORKBENCH" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                    <Button HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                            Width="30" Height="30" Padding="0"
+                                                            Style="{StaticResource SecondaryButton}"
+                                                            Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"
+                                                            Command="{Binding ToggleNavigationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            ToolTip="收起左侧菜单">
+                                                        <TextBlock Text="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                                                    </Button>
+                                                </Grid>
+                                                <Button Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                        Width="30" Height="30" Padding="0" Margin="0,-16,0,8"
+                                                        Style="{StaticResource SecondaryButton}"
+                                                        Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource InverseBoolToVis}}"
+                                                        Command="{Binding ToggleNavigationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        ToolTip="展开左侧菜单">
+                                                    <TextBlock Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                                                </Button>
+                                                <TextBlock Grid.Row="1" Text="工作区" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="8,0,0,8"
+                                                           Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                                            </Grid>
+                                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+                                            </ScrollViewer>
+                                            <Border Grid.Row="2" Background="{DynamicResource BgSurfaceAltBrush}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="9" Padding="10" Margin="2,14,2,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource SuccessBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                    <TextBlock Text="协议工作站" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <Border Grid.Column="1" Background="{DynamicResource BgCanvasBrush}" ClipToBounds="True">
+                                        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" SnapsToDevicePixels="True" />
+                                    </Border>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
                 <Style TargetType="TabItem">
-                    <Setter Property="Padding" Value="16,12" />
-                    <Setter Property="FontSize" Value="13" />
+                    <Setter Property="Padding" Value="11,10" />
+                    <Setter Property="FontSize" Value="12.5" />
+                    <Setter Property="MinWidth" Value="188" />
                     <Setter Property="FontWeight" Value="Medium" />
                     <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
                     <Setter Property="Background" Value="Transparent" />
@@ -36,18 +111,22 @@
                             <ControlTemplate TargetType="TabItem">
                                 <Border x:Name="Bd"
                                         Background="{TemplateBinding Background}"
-                                        BorderBrush="{DynamicResource AccentBrush}"
-                                        BorderThickness="0"
                                         Padding="{TemplateBinding Padding}"
-                                        Margin="4,2">
+                                        Margin="0,2"
+                                        CornerRadius="8">
                                     <ContentPresenter ContentSource="Header" VerticalAlignment="Center" />
                                 </Border>
                                 <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgNavHoverBrush}" />
+                                    </Trigger>
                                     <Trigger Property="IsSelected" Value="True">
-                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgSurfaceBrush}" />
-                                        <Setter TargetName="Bd" Property="BorderThickness" Value="3,0,0,0" />
-                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgNavSelectedBrush}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
                                         <Setter Property="FontWeight" Value="SemiBold" />
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Opacity" Value="0.5" />
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -57,8 +136,14 @@
             </TabControl.Resources>
 
             <!-- 1. 通讯连接 & Modbus 服务器 -->
-            <TabItem Header="通讯连接 &amp; 服务器">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE703;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="通讯连接 &amp; 服务器" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
                     <StackPanel DataContext="{Binding Connection}">
                         <!-- Client / Transport Channel Card -->
                         <Border Style="{StaticResource CardBorder}">
@@ -156,8 +241,15 @@
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="本地监听端口" />
                                             <TextBox Text="{Binding TcpServer.ListenPort}" Padding="6,4" />
                                         </StackPanel>
+                                        <StackPanel MinWidth="220" MaxWidth="520" Margin="0,0,12,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="可连接地址（本机任一 IP:端口）" />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshLocalIpAddressesCommand}" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="6,0,0,0" />
+                                                <TextBlock Text="{Binding LocalIpAddressesText}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
+                                            </DockPanel>
+                                        </StackPanel>
                                         <TextBlock VerticalAlignment="Bottom" Margin="0,0,0,12" FontSize="12" Foreground="{DynamicResource TextMutedBrush}"
-                                                   Text="支持多客户端并发接入；可在「原始报文」页选择指定客户端定向发送或广播" />
+                                                   Text="监听绑定 0.0.0.0，列出的任一 IP:端口均可连接（受网卡状态和防火墙影响）；支持多客户端并发接入" />
                                     </WrapPanel>
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding ServerClients.Count, StringFormat='已连接客户端会话 ({0})'}" />
                                     <DataGrid ItemsSource="{Binding ServerClients}" AutoGenerateColumns="False" IsReadOnly="True" Height="120" HeadersVisibility="Column">
@@ -243,7 +335,7 @@
 
                                 <!-- Add Register Definition Row -->
                                 <WrapPanel Margin="0,0,0,10">
-                                    <StackPanel Width="145" Margin="0,0,8,6">
+                                    <StackPanel Width="190" Margin="0,0,8,6">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="存储区" />
                                         <ComboBox ItemsSource="{Binding RegisterAreas}" SelectedItem="{Binding NewArea}" Padding="5,4" />
                                     </StackPanel>
@@ -267,7 +359,12 @@
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="备注" />
                                         <TextBox Text="{Binding NewNote}" Padding="5,4" />
                                     </StackPanel>
+                                    <StackPanel Width="70" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="批量数量" />
+                                        <TextBox Text="{Binding NewRegisterCount, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                    </StackPanel>
                                     <Button Style="{StaticResource PrimaryButton}" Content="+ 添加数据定义" Command="{Binding AddRegisterCommand}" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="批量添加" Command="{Binding AddRegisterBatchCommand}" VerticalAlignment="Bottom" Margin="0,0,0,6" />
                                 </WrapPanel>
 
                                 <!-- Server Register Table with Online Runtime Value Editing -->
@@ -330,8 +427,14 @@
             </TabItem>
 
             <!-- 2. Modbus 调试 -->
-            <TabItem Header="Modbus 调试">
-                <Grid Margin="18" DataContext="{Binding ModbusDebug}">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8F1;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Modbus 调试" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12" DataContext="{Binding ModbusDebug}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -351,7 +454,10 @@
                                 </StackPanel>
                                 <StackPanel Width="270" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="功能码 (Function Code)" />
-                                    <ComboBox ItemsSource="{Binding Functions}" SelectedItem="{Binding SelectedFunction}" Padding="6,4" />
+                                    <ComboBox ItemsSource="{Binding Functions}"
+                                              SelectedItem="{Binding SelectedFunction}"
+                                              DisplayMemberPath="Label"
+                                              Padding="6,4" />
                                 </StackPanel>
                                 <StackPanel Width="100" Margin="0,0,10,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
@@ -431,8 +537,14 @@
             </TabItem>
 
             <!-- 3. 原始报文调试 -->
-            <TabItem Header="原始报文">
-                <Grid Margin="18" DataContext="{Binding RawDebug}">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8C0;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="原始报文" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12" DataContext="{Binding RawDebug}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -504,136 +616,193 @@
             </TabItem>
 
             <!-- 4. 数据监听 & 示波器 -->
-            <TabItem Header="数据监听 &amp; 示波器">
-                <Grid Margin="18" DataContext="{Binding RegisterMonitor}">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="数据监听 &amp; 示波器" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12" DataContext="{Binding RegisterMonitor}">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" MinHeight="262" />
+                        <RowDefinition />
                     </Grid.RowDefinitions>
 
-                    <Border Style="{StaticResource CardBorder}" Grid.Row="0">
-                        <StackPanel>
-                            <DockPanel Margin="0,0,0,8">
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button Style="{StaticResource SecondaryButton}" Content="{Binding SampleOnceLabel}" Command="{Binding SampleOnceCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource PrimaryButton}" Content="开始监听" Command="{Binding StartCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource DangerButton}" Content="停止监听" Command="{Binding StopCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="冻结/恢复" Command="{Binding ToggleFreezeCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="清空波形" Command="{Binding ClearScopeCommand}" Margin="0,0,6,0" />
-                                    <Button Style="{StaticResource SecondaryButton}" Content="导出 CSV" Command="{Binding ExportCsvCommand}" />
-                                </StackPanel>
-                                <TextBlock Style="{StaticResource SectionTitle}" Text="多通道实时数据监听与示波器中心 (支持 Bool 布尔方波 / Float / Double)" Margin="0" VerticalAlignment="Center" />
-                            </DockPanel>
+                    <Border Style="{StaticResource CardBorder}" Grid.Row="0" MaxHeight="250" Margin="0,0,0,12">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Style="{StaticResource SecondaryButton}" Content="{Binding SampleOnceLabel}" Command="{Binding SampleOnceCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource PrimaryButton}" Content="开始监听" Command="{Binding StartCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource DangerButton}" Content="停止监听" Command="{Binding StopCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="冻结/恢复" Command="{Binding ToggleFreezeCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="清空波形" Command="{Binding ClearScopeCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="导出 CSV" Command="{Binding ExportCsvCommand}" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="多通道实时数据监听与示波器中心 (支持 Bool 布尔方波 / Float / Double)" Margin="0" VerticalAlignment="Center" />
+                                </DockPanel>
 
-                            <WrapPanel>
-                                <StackPanel Width="145" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="数据源" />
-                                    <ComboBox ItemsSource="{Binding DataSources}" SelectedItem="{Binding DataSource}" Padding="5,4" />
-                                </StackPanel>
-                                <StackPanel Width="105" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="视图布局" />
-                                    <ComboBox ItemsSource="{Binding ViewLayouts}" SelectedItem="{Binding ViewLayout}" Padding="5,4" />
-                                </StackPanel>
-                                <WrapPanel Visibility="{Binding IsPollingMode, Converter={StaticResource BoolToVis}}">
-                                    <StackPanel Width="80" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="协议" />
-                                        <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="5,4" />
+                                <WrapPanel Margin="0,0,0,8">
+                                    <StackPanel Width="170" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="采集组" />
+                                        <ComboBox ItemsSource="{Binding PollingGroups}" SelectedItem="{Binding SelectedPollingGroup}" Padding="5,4">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="2,3">
+                                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding LastStatus}" FontSize="10" Foreground="{DynamicResource TextMutedBrush}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
                                     </StackPanel>
-                                    <StackPanel Width="60" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="站号" />
-                                        <TextBox Text="{Binding UnitId}" Padding="5,4" />
+                                    <StackPanel Width="145" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="组名称" />
+                                        <TextBox Text="{Binding SelectedPollingGroup.Name, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="65" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="功能码" />
-                                        <ComboBox ItemsSource="{Binding ReadFunctions}" SelectedItem="{Binding FunctionCode}" Padding="5,4" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="＋ 添加采集组" Command="{Binding AddPollingGroupCommand}" VerticalAlignment="Bottom" Margin="0,0,8,6" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="删除当前组" Command="{Binding RemovePollingGroupCommand}" VerticalAlignment="Bottom" Margin="0,0,12,6" />
+                                    <CheckBox Content="启用此组" IsChecked="{Binding SelectedPollingGroup.IsEnabled}" IsEnabled="{Binding IsPollingMode}" VerticalAlignment="Bottom" Margin="0,0,12,12" />
+                                </WrapPanel>
+
+                                <WrapPanel>
+                                    <StackPanel Width="145" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="数据源" />
+                                        <ComboBox ItemsSource="{Binding DataSources}" SelectedItem="{Binding DataSource}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="70" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
-                                        <TextBox Text="{Binding StartAddress}" Padding="5,4" />
+                                    <StackPanel Width="105" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="视图布局" />
+                                        <ComboBox ItemsSource="{Binding ViewLayouts}" SelectedItem="{Binding ViewLayout}" Padding="5,4" />
                                     </StackPanel>
-                                    <StackPanel Width="60" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="数量" />
-                                        <TextBox Text="{Binding Quantity}" Padding="5,4" />
-                                    </StackPanel>
-                                    <WrapPanel Visibility="{Binding IsRegisterFunction, Converter={StaticResource BoolToVis}}">
-                                        <StackPanel Width="88" Margin="0,0,8,6">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
-                                            <ComboBox ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
+                                    <WrapPanel Visibility="{Binding IsPollingMode, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel Width="80" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="协议" />
+                                            <ComboBox ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport}" Padding="5,4" />
                                         </StackPanel>
-                                        <StackPanel Width="90" Margin="0,0,8,6">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
-                                            <ComboBox ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
+                                        <StackPanel Width="60" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="站号" />
+                                            <TextBox Text="{Binding UnitId}" Padding="5,4" />
                                         </StackPanel>
                                         <StackPanel Width="65" Margin="0,0,8,6">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="缩放" />
-                                            <TextBox Text="{Binding Scale}" Padding="5,4" />
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="功能码" />
+                                            <ComboBox ItemsSource="{Binding ReadFunctions}" SelectedItem="{Binding FunctionCode}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="70" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="起始地址" />
+                                            <TextBox Text="{Binding StartAddress}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="90" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="数量（位/寄存器）" />
+                                            <TextBox Text="{Binding Quantity}" Padding="5,4" />
+                                        </StackPanel>
+                                        <WrapPanel Visibility="{Binding IsRegisterFunction, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Width="88" Margin="0,0,8,6">
+                                                <TextBlock Style="{StaticResource FieldLabel}" Text="数据类型" />
+                                                <ComboBox ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataType}" Padding="5,4" />
+                                            </StackPanel>
+                                            <StackPanel Width="90" Margin="0,0,8,6">
+                                                <TextBlock Style="{StaticResource FieldLabel}" Text="字节序" />
+                                                <ComboBox ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrder}" Padding="5,4" />
+                                            </StackPanel>
+                                            <StackPanel Width="65" Margin="0,0,8,6">
+                                                <TextBlock Style="{StaticResource FieldLabel}" Text="缩放" />
+                                                <TextBox Text="{Binding Scale}" Padding="5,4" />
+                                            </StackPanel>
+                                        </WrapPanel>
+                                    </WrapPanel>
+                                    <StackPanel Width="80" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="本组周期(ms)" />
+                                        <TextBox Text="{Binding IntervalMs}" Padding="5,4" />
+                                    </StackPanel>
+                                    <Button Style="{StaticResource PrimaryButton}" Content="＋ 添加数据到当前组" Command="{Binding AddPollingDataCommand}" IsEnabled="{Binding IsPollingMode}" VerticalAlignment="Bottom" Margin="0,0,12,6" />
+                                    <StackPanel Width="80" Margin="0,0,8,6">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="时窗(秒)" />
+                                        <ComboBox ItemsSource="{Binding TimeWindows}" SelectedItem="{Binding TimeWindowSec}" Padding="5,4" />
+                                    </StackPanel>
+                                    <CheckBox Content="采样点" IsChecked="{Binding ShowMarkers}" VerticalAlignment="Bottom" Margin="4,0,10,10" />
+                                    <CheckBox Content="自动 Y 轴" IsChecked="{Binding AutoScaleY}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
+                                    <WrapPanel Visibility="{Binding IsManualY, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel Width="70" Margin="0,0,6,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Y Min" />
+                                            <TextBox Text="{Binding ManualYMin, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="70" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Y Max" />
+                                            <TextBox Text="{Binding ManualYMax, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
+                                        </StackPanel>
+                                    </WrapPanel>
+                                    <CheckBox Content="边沿触发" IsChecked="{Binding TriggerEnabled}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
+                                    <WrapPanel Visibility="{Binding TriggerEnabled, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel Width="125" Margin="0,0,6,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="触发通道" />
+                                            <ComboBox ItemsSource="{Binding ScopeChannels}" SelectedItem="{Binding TriggerChannel}" DisplayMemberPath="Label" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="85" Margin="0,0,6,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="边沿" />
+                                            <ComboBox ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="75" Margin="0,0,8,6">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="触发电平" />
+                                            <TextBox Text="{Binding TriggerLevel, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
                                         </StackPanel>
                                     </WrapPanel>
                                 </WrapPanel>
-                                <StackPanel Width="80" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="周期(ms)" />
-                                    <TextBox Text="{Binding IntervalMs}" Padding="5,4" />
-                                </StackPanel>
-                                <StackPanel Width="80" Margin="0,0,8,6">
-                                    <TextBlock Style="{StaticResource FieldLabel}" Text="时窗(秒)" />
-                                    <ComboBox ItemsSource="{Binding TimeWindows}" SelectedItem="{Binding TimeWindowSec}" Padding="5,4" />
-                                </StackPanel>
-                                <CheckBox Content="采样点" IsChecked="{Binding ShowMarkers}" VerticalAlignment="Bottom" Margin="4,0,10,10" />
-                                <CheckBox Content="自动 Y 轴" IsChecked="{Binding AutoScaleY}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
-                                <WrapPanel Visibility="{Binding IsManualY, Converter={StaticResource BoolToVis}}">
-                                    <StackPanel Width="70" Margin="0,0,6,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Y Min" />
-                                        <TextBox Text="{Binding ManualYMin, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
-                                    </StackPanel>
-                                    <StackPanel Width="70" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Y Max" />
-                                        <TextBox Text="{Binding ManualYMax, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
-                                    </StackPanel>
-                                </WrapPanel>
-                                <CheckBox Content="边沿触发" IsChecked="{Binding TriggerEnabled}" VerticalAlignment="Bottom" Margin="0,0,8,10" />
-                                <WrapPanel Visibility="{Binding TriggerEnabled, Converter={StaticResource BoolToVis}}">
-                                    <StackPanel Width="125" Margin="0,0,6,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="触发通道" />
-                                        <ComboBox ItemsSource="{Binding ScopeChannels}" SelectedItem="{Binding TriggerChannel}" DisplayMemberPath="Label" Padding="5,4" />
-                                    </StackPanel>
-                                    <StackPanel Width="85" Margin="0,0,6,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="边沿" />
-                                        <ComboBox ItemsSource="{Binding TriggerEdges}" SelectedItem="{Binding TriggerEdge}" Padding="5,4" />
-                                    </StackPanel>
-                                    <StackPanel Width="75" Margin="0,0,8,6">
-                                        <TextBlock Style="{StaticResource FieldLabel}" Text="触发电平" />
-                                        <TextBox Text="{Binding TriggerLevel, UpdateSourceTrigger=PropertyChanged}" Padding="5,4" />
-                                    </StackPanel>
-                                </WrapPanel>
-                            </WrapPanel>
-                            <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource AccentBrush}" Margin="0,4,0,0" />
-                        </StackPanel>
+                                <DockPanel Margin="0,0,0,6" Visibility="{Binding IsPollingMode, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock DockPanel.Dock="Left" Text="当前组数据" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SelectedPollingGroup.DataItems.Count, StringFormat='共 {0} 项'}" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                                    <ScrollViewer MaxHeight="72" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl ItemsSource="{Binding SelectedPollingGroup.DataItems}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{DynamicResource BgSurfaceAltBrush}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="7" Padding="8,4" Margin="0,0,6,5">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding DisplayName}" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                                            <Button Content="×" Padding="5,0" MinHeight="22" Command="{Binding DataContext.RemovePollingDataCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" ToolTip="从当前组移除此数据" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </DockPanel>
+                                <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource AccentBrush}" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </ScrollViewer>
                     </Border>
 
                     <!-- Oscilloscope + Channel Legend + Live Value Table -->
                     <Grid Grid.Row="1">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="10" />
-                            <RowDefinition Height="200" />
+                            <RowDefinition Height="{Binding ScopeRowHeight}" />
+                            <RowDefinition Height="{Binding ScopeTableSplitterHeight}" />
+                            <RowDefinition Height="{Binding TableRowHeight}" />
                         </Grid.RowDefinitions>
 
                         <Border Grid.Row="0"
                                 Style="{StaticResource CardBorder}"
                                 Margin="0"
-                                Padding="10"
+                                Padding="8"
+                                MinHeight="250"
                                 Visibility="{Binding ShowScope, Converter={StaticResource BoolToVis}}">
                             <DockPanel>
                                 <!-- Clickable Channel Telemetry Legend Strip -->
-                                <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding ScopeChannels}" Margin="0,0,0,8">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Button Margin="0,0,6,6"
+                                <ScrollViewer DockPanel.Dock="Top" MaxHeight="66" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,6">
+                                    <ItemsControl ItemsSource="{Binding ScopeChannels}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Margin="0,0,6,6"
                                                     Padding="8,4"
                                                     Cursor="Hand"
                                                     Background="{DynamicResource BgSurfaceAltBrush}"
@@ -641,16 +810,17 @@
                                                     BorderThickness="1"
                                                     Command="{Binding DataContext.ToggleChannelScopeCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <Border Width="10" Height="10" CornerRadius="2" Background="{Binding ColorHex, Converter={StaticResource HexToBrush}}" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding LatestText}" FontFamily="Consolas" FontWeight="Bold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding RangeText}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
-                                                </StackPanel>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Border Width="10" Height="10" CornerRadius="2" Background="{Binding ColorHex, Converter={StaticResource HexToBrush}}" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding LatestText}" FontFamily="Consolas" FontWeight="Bold" FontSize="11.5" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                        <TextBlock Text="{Binding RangeText}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
 
                                 <Border BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                                     <controls:OscilloscopeControl ViewModel="{Binding}" />
@@ -690,8 +860,14 @@
             </TabItem>
 
             <!-- 5. 报文分析 -->
-            <TabItem Header="报文分析">
-                <Grid Margin="18" DataContext="{Binding PacketAnalysis}">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="报文分析" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12" DataContext="{Binding PacketAnalysis}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -745,8 +921,14 @@
             </TabItem>
 
             <!-- 6. 设备配置管理 -->
-            <TabItem Header="设备管理">
-                <Grid Margin="18" DataContext="{Binding DeviceManagement}">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE950;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="设备管理" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="12" DataContext="{Binding DeviceManagement}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -802,25 +984,103 @@
             </TabItem>
 
             <!-- 7. 系统设置 -->
-            <TabItem Header="系统设置">
-                <StackPanel Margin="18" DataContext="{Binding Settings}" MaxWidth="620" HorizontalAlignment="Left">
-                    <Border Style="{StaticResource CardBorder}">
-                        <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="界面与全局通讯参数设置" />
-                            <CheckBox Content="启用深色工业夜间主题 (Dark Mode)" IsChecked="{Binding IsDarkTheme}" Margin="0,4,0,14" FontSize="13" />
-                            <StackPanel Width="220" HorizontalAlignment="Left" Margin="0,0,0,10">
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="默认 Modbus 请求超时 (ms)" />
-                                <TextBox Text="{Binding DefaultTimeoutMs}" Padding="6,4" />
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock Text="系统设置" VerticalAlignment="Center" Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer Margin="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="28,24,28,24" DataContext="{Binding Settings}" MaxWidth="1040" HorizontalAlignment="Stretch">
+                        <TextBlock Text="系统设置" FontSize="25" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,5" />
+                        <TextBlock Text="管理界面外观和 Modbus 通讯默认行为" FontSize="13" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,20" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="外观" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
+                                <Border Style="{StaticResource CardBorder}" Padding="16" Margin="0,0,0,14">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="True">
+                                            <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="12" Background="{DynamicResource BgNavSelectedBrush}" Margin="0,0,12,0">
+                                                <TextBlock Text="&#xE790;" FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="应用主题" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                <TextBlock Text="即时切换浅色与深色工作环境" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Border Background="{DynamicResource BgSurfaceAltBrush}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,14,0,0">
+                                            <CheckBox Content="启用深色模式" IsChecked="{Binding IsDarkTheme, Mode=TwoWay}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="主题会立即应用并自动保存，无需重启程序。" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="2,9,0,0" />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                            <StackPanel Width="220" HorizontalAlignment="Left" Margin="0,0,0,14">
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="默认自动重试次数" />
-                                <TextBox Text="{Binding DefaultRetryTimes}" Padding="6,4" />
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="通讯默认值" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8" />
+                                <Border Style="{StaticResource CardBorder}" Padding="16" Margin="0,0,0,14">
+                                    <StackPanel>
+                                        <TextBlock Text="Modbus 请求策略" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                        <TextBlock Text="用于调试和监听请求的默认等待与重试设置。" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,14" TextWrapping="Wrap" />
+
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="130" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="响应超时" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                <TextBlock Text="等待设备响应的最长时间" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Text="{Binding DefaultTimeoutMs, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="毫秒" />
+                                        </Grid>
+
+                                        <Border Height="1" Background="{DynamicResource BorderSubtleBrush}" Margin="0,2,0,10" />
+
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="130" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="失败重试次数" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                                <TextBlock Text="请求失败后的自动重试次数" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Text="{Binding DefaultRetryTimes, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="次" />
+                                        </Grid>
+
+                                        <Button Style="{StaticResource PrimaryButton}" Content="保存通讯设置" Command="{Binding SaveCommand}" HorizontalAlignment="Right" Margin="0,14,0,0" />
+                                        <TextBlock Text="{Binding SaveBanner}" Foreground="{DynamicResource SuccessBrush}" FontSize="11" HorizontalAlignment="Right" Margin="0,7,0,0" />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
-                            <Button Style="{StaticResource PrimaryButton}" Content="保存系统设置" Command="{Binding SaveCommand}" HorizontalAlignment="Left" />
-                            <TextBlock Text="{Binding SaveBanner}" Foreground="{DynamicResource SuccessBrush}" Margin="0,10,0,0" />
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
+                        </Grid>
+
+                        <TextBlock Text="关于" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,4,0,8" />
+                        <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Left" Width="38" Height="38" CornerRadius="11" Background="{DynamicResource AccentBrush}" Margin="0,0,12,0">
+                                    <TextBlock Text="M" FontSize="20" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Yuandl Modbus Assistant" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="Yuandl Modbus Assistant v1.0.0
+
+工业通讯与协议分析套件（支持串口仿真、TCP/UDP 通讯、Modbus 帧编解码与内置 Modbus TCP 服务器）" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="串口 · TCP/UDP · Modbus" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
 

@@ -387,7 +387,8 @@ public sealed class ModbusServerService : IDisposable
                     buffer.RemoveRange(0, totalLength);
 
                     byte unitId = frame[6];
-                    var pdu = frame.AsSpan(7);
+                    var pdu = new byte[frame.Length - 7];
+                    Array.Copy(frame, 7, pdu, 0, pdu.Length);
                     var responsePdu = ProcessRequest(unitId, pdu);
 
                     var response = new byte[7 + responsePdu.Length];

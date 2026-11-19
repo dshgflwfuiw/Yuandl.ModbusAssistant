@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO.Ports;
 using Yuandl.ModbusAssistant.Core.Enums;
 
@@ -32,9 +33,22 @@ public sealed class UdpParameters
     public int LocalPort { get; set; } = 0;
 }
 
-public sealed class TcpServerParameters
+public sealed class TcpServerParameters : INotifyPropertyChanged
 {
-    public int ListenPort { get; set; } = 6000;
+    private int _listenPort = 6000;
+
+    public int ListenPort
+    {
+        get => _listenPort;
+        set
+        {
+            if (_listenPort == value) return;
+            _listenPort = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ListenPort)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 public sealed class TcpServerClientSession

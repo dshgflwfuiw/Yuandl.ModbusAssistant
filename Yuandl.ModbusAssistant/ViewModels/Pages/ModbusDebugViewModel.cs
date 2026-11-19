@@ -32,14 +32,14 @@ public sealed class ModbusDebugViewModel : ObservableObject
 
         Functions = new[]
         {
-            new ModbusFunctionOption { Code = 1, Label = "01 - 读线圈 (Read Coils)" },
-            new ModbusFunctionOption { Code = 2, Label = "02 - 读离散输入 (Read Discrete Inputs)" },
-            new ModbusFunctionOption { Code = 3, Label = "03 - 读保持寄存器 (Read Holding Registers)" },
-            new ModbusFunctionOption { Code = 4, Label = "04 - 读输入寄存器 (Read Input Registers)" },
-            new ModbusFunctionOption { Code = 5, Label = "05 - 写单线圈 (Write Single Coil)" },
-            new ModbusFunctionOption { Code = 6, Label = "06 - 写单寄存器 (Write Single Register)" },
-            new ModbusFunctionOption { Code = 15, Label = "0F (15) - 写多个线圈 (Write Multiple Coils)" },
-            new ModbusFunctionOption { Code = 16, Label = "10 (16) - 写多个寄存器 (Write Multiple Registers)" }
+            new ModbusFunctionOption { Code = 1, Label = "01 (0x01) - 读线圈" },
+            new ModbusFunctionOption { Code = 2, Label = "02 (0x02) - 读离散输入" },
+            new ModbusFunctionOption { Code = 3, Label = "03 (0x03) - 读保持寄存器" },
+            new ModbusFunctionOption { Code = 4, Label = "04 (0x04) - 读输入寄存器" },
+            new ModbusFunctionOption { Code = 5, Label = "05 (0x05) - 写单个线圈" },
+            new ModbusFunctionOption { Code = 6, Label = "06 (0x06) - 写单个寄存器" },
+            new ModbusFunctionOption { Code = 15, Label = "0F (0x0F) - 写多个线圈" },
+            new ModbusFunctionOption { Code = 16, Label = "10 (0x10) - 写多个寄存器" }
         };
         _selectedFunction = Functions[2];
 
