@@ -29,7 +29,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Connection = new ConnectionViewModel(CommunicationService, ModbusServerService, _persistence);
         ModbusDebug = new ModbusDebugViewModel(CommunicationService, Settings);
         RawDebug = new RawDebugViewModel(CommunicationService);
-        RegisterMonitor = new RegisterMonitorViewModel(CommunicationService, ModbusServerService, Settings);
+        RegisterMonitor = new RegisterMonitorViewModel(CommunicationService, ModbusServerService, Settings, _persistence);
         PacketAnalysis = new PacketAnalysisViewModel(CommunicationService);
         DeviceManagement = new DeviceManagementViewModel(_persistence);
 

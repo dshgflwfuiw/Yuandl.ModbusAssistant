@@ -18,6 +18,7 @@ public sealed class PersistenceService
     private string SettingsPath => Path.Combine(_baseDirectory, "settings.json");
     private string ProfilesPath => Path.Combine(_baseDirectory, "profiles.json");
     private string ServerConfigPath => Path.Combine(_baseDirectory, "server-config.json");
+    private string MonitorConfigPath => Path.Combine(_baseDirectory, "monitor-config.json");
 
     public PersistenceService()
     {
@@ -110,6 +111,30 @@ public sealed class PersistenceService
         try
         {
             File.WriteAllText(ServerConfigPath, JsonSerializer.Serialize(config, JsonOptions));
+        }
+        catch { /* ignore IO failure */ }
+    }
+
+    public MonitorConfiguration LoadMonitorConfiguration()
+    {
+        try
+        {
+            if (File.Exists(MonitorConfigPath))
+            {
+                var json = File.ReadAllText(MonitorConfigPath);
+                return JsonSerializer.Deserialize<MonitorConfiguration>(json, JsonOptions) ?? new MonitorConfiguration();
+            }
+        }
+        catch { /* fallback to empty monitor configuration */ }
+
+        return new MonitorConfiguration();
+    }
+
+    public void SaveMonitorConfiguration(MonitorConfiguration config)
+    {
+        try
+        {
+            File.WriteAllText(MonitorConfigPath, JsonSerializer.Serialize(config, JsonOptions));
         }
         catch { /* ignore IO failure */ }
     }

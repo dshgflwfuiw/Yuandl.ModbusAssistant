@@ -58,10 +58,10 @@ public static class RegisterValueConverter
                 Array.Reverse(bytes);
                 break;
             case RegisterByteOrder.WordSwap:
-                for (int i = 0; i + 3 < bytes.Length; i += 4)
+                for (int left = 0, right = bytes.Length - 2; left < right; left += 2, right -= 2)
                 {
-                    (bytes[i], bytes[i + 2]) = (bytes[i + 2], bytes[i]);
-                    (bytes[i + 1], bytes[i + 3]) = (bytes[i + 3], bytes[i + 1]);
+                    (bytes[left], bytes[right]) = (bytes[right], bytes[left]);
+                    (bytes[left + 1], bytes[right + 1]) = (bytes[right + 1], bytes[left + 1]);
                 }
                 break;
             case RegisterByteOrder.ByteSwap:

@@ -87,7 +87,7 @@ public sealed class ChineseValueConverter : IValueConverter
                 RegisterDataType.Double => "双精度 Double",
                 RegisterByteOrder.BigEndian => "ABCD 大端序",
                 RegisterByteOrder.LittleEndian => "DCBA 小端序",
-                RegisterByteOrder.WordSwap => "CDAB 字交换",
+                RegisterByteOrder.WordSwap => "CDAB 字交换（64位字逆序）",
                 RegisterByteOrder.ByteSwap => "BADC 字节交换",
                 ServerRegisterArea.HoldingRegister => "0x03/06/16 - 保持寄存器",
                 ServerRegisterArea.InputRegister => "0x04 - 输入寄存器",
@@ -102,7 +102,7 @@ public sealed class ChineseValueConverter : IValueConverter
                 ServerRegisterDataType.Double => "双精度 Double",
                 ServerRegisterByteOrder.BigEndian => "ABCD 大端序",
                 ServerRegisterByteOrder.LittleEndian => "DCBA 小端序",
-                ServerRegisterByteOrder.WordSwap => "CDAB 字交换",
+                ServerRegisterByteOrder.WordSwap => "CDAB 字交换（64位字逆序）",
                 ServerRegisterByteOrder.ByteSwap => "BADC 字节交换",
                 ModbusServerTransportMode.Tcp => "TCP",
                 ModbusServerTransportMode.SerialRtu => "串口 RTU",
@@ -171,6 +171,36 @@ public sealed class HexColorToBrushConverter : IValueConverter
             catch { /* fallback */ }
         }
         return Brushes.Cyan;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        Binding.DoNothing;
+}
+
+public sealed class HexColorToContrastBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is string hex && !string.IsNullOrWhiteSpace(hex))
+        {
+            try
+            {
+                var color = (Color)ColorConverter.ConvertFromString(hex);
+                static double Linearize(byte channel)
+                {
+                    double value = channel / 255.0;
+                    return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+                }
+
+                double luminance = 0.2126 * Linearize(color.R)
+                    + 0.7152 * Linearize(color.G)
+                    + 0.0722 * Linearize(color.B);
+                return luminance > 0.179 ? Brushes.Black : Brushes.White;
+            }
+            catch { /* fallback */ }
+        }
+
+        return Brushes.White;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>

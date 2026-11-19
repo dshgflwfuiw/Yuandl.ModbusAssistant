@@ -425,23 +425,22 @@ public sealed class ModbusServerService : IDisposable
 
                 for (int i = 0; i < read; i++) buffer.Add(temp[i]);
 
-                // Short quiet gap allows full RTU frame aggregation
-                await Task.Delay(20, token);
                 while (sp.BytesToRead > 0)
                 {
                     int extra = sp.Read(temp, 0, Math.Min(temp.Length, sp.BytesToRead));
                     for (int i = 0; i < extra; i++) buffer.Add(temp[i]);
                 }
 
-                var raw = buffer.ToArray();
-                buffer.Clear();
-
-                var reply = TryBuildSerialResponse(raw);
-                if (reply != null)
+                while (TryTakeSerialFrame(buffer, out var raw))
                 {
+                    var reply = TryBuildSerialResponse(raw);
+                    if (reply == null) continue;
                     await sp.BaseStream.WriteAsync(reply, token);
                     await sp.BaseStream.FlushAsync(token);
                 }
+
+                if (buffer.Count > 4096)
+                    buffer.RemoveRange(0, buffer.Count - 4096);
             }
             catch (OperationCanceledException)
             {
@@ -452,6 +451,65 @@ public sealed class ModbusServerService : IDisposable
                 buffer.Clear();
             }
         }
+    }
+
+    private bool TryTakeSerialFrame(List<byte> buffer, out byte[] frame)
+    {
+        frame = Array.Empty<byte>();
+        bool allowRtu = ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.TcpAndSerial;
+        bool allowAscii = ServerMode is ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
+
+        while (buffer.Count > 0)
+        {
+            if (buffer[0] == (byte)':' && allowAscii)
+            {
+                int terminator = -1;
+                for (int i = 1; i < buffer.Count; i++)
+                {
+                    if (buffer[i - 1] == (byte)'\r' && buffer[i] == (byte)'\n')
+                    {
+                        terminator = i;
+                        break;
+                    }
+                }
+
+                if (terminator < 0) return false;
+                int length = terminator + 1;
+                frame = buffer.GetRange(0, length).ToArray();
+                buffer.RemoveRange(0, length);
+                return true;
+            }
+
+            if (!allowRtu)
+            {
+                buffer.RemoveAt(0);
+                continue;
+            }
+
+            if (buffer.Count < 2) return false;
+            int functionCode = buffer[1];
+            int expectedLength = functionCode switch
+            {
+                1 or 2 or 3 or 4 or 5 or 6 => 8,
+                15 or 16 when buffer.Count < 7 => 0,
+                15 or 16 => 9 + buffer[6],
+                _ => 4
+            };
+
+            if (expectedLength == 0 || buffer.Count < expectedLength) return false;
+            var candidate = buffer.GetRange(0, expectedLength).ToArray();
+            if (!Crc16.Verify(candidate))
+            {
+                buffer.RemoveAt(0);
+                continue;
+            }
+
+            buffer.RemoveRange(0, expectedLength);
+            frame = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private byte[]? TryBuildSerialResponse(byte[] bytes)

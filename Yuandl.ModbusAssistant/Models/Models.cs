@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO.Ports;
+using System.Runtime.CompilerServices;
 using Yuandl.ModbusAssistant.Core.Enums;
 
 namespace Yuandl.ModbusAssistant.Models;
@@ -112,6 +113,41 @@ public sealed class AppSettings
     public int DefaultRetryTimes { get; set; } = 2;
 }
 
+public sealed class MonitorConfiguration
+{
+    public string? SelectedGroupId { get; set; }
+    public List<MonitorPollingGroupConfiguration> Groups { get; set; } = new();
+    public Dictionary<string, string> ChannelNotes { get; set; } = new();
+}
+
+public sealed class MonitorPollingGroupConfiguration
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = string.Empty;
+    public ModbusTransport Transport { get; set; } = ModbusTransport.Tcp;
+    public byte UnitId { get; set; } = 1;
+    public byte FunctionCode { get; set; } = 3;
+    public ushort StartAddress { get; set; }
+    public ushort Quantity { get; set; } = 6;
+    public RegisterDataType DataType { get; set; } = RegisterDataType.UInt16;
+    public RegisterByteOrder ByteOrder { get; set; } = RegisterByteOrder.BigEndian;
+    public double Scale { get; set; } = 1.0;
+    public int IntervalMs { get; set; } = 500;
+    public bool IsEnabled { get; set; } = true;
+    public List<MonitorPollingDataConfiguration> DataItems { get; set; } = new();
+}
+
+public sealed class MonitorPollingDataConfiguration
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public byte FunctionCode { get; set; }
+    public ushort StartAddress { get; set; }
+    public ushort Quantity { get; set; }
+    public RegisterDataType DataType { get; set; }
+    public RegisterByteOrder ByteOrder { get; set; }
+    public double Scale { get; set; }
+}
+
 public sealed class RawMessageItem
 {
     public string Timestamp { get; set; } = string.Empty;
@@ -145,27 +181,59 @@ public sealed class AnalyzedPacketEntry
     public string RttText => RttMs.HasValue ? $"{RttMs.Value:0.#} ms" : "—";
 }
 
-public sealed class RegisterMonitorRow
+public sealed class RegisterMonitorRow : INotifyPropertyChanged
 {
-    public string ChannelId { get; set; } = string.Empty;
-    public string Label { get; set; } = string.Empty;
-    public int Address { get; set; }
-    public string RawValue { get; set; } = string.Empty;
-    public double Value { get; set; }
-    public bool IsDigital { get; set; }
-    public bool IsEnabledInScope { get; set; } = true;
-    public string ScopeToggleText => IsEnabledInScope ? "显示" : "隐藏";
-    public string TraceColorHex { get; set; } = "#22D3EE";
-
+    private string _channelId = string.Empty;
+    private string _label = string.Empty;
+    private int _address;
+    private string _rawValue = string.Empty;
+    private double _value;
+    private bool _isDigital;
+    private bool _isEnabledInScope = true;
+    private string _traceColorHex = "#22D3EE";
     private string _note = string.Empty;
+
+    public string ChannelId { get => _channelId; set => SetProperty(ref _channelId, value); }
+    public string Label { get => _label; set => SetProperty(ref _label, value); }
+    public int Address { get => _address; set => SetProperty(ref _address, value); }
+    public string RawValue { get => _rawValue; set => SetProperty(ref _rawValue, value); }
+    public double Value
+    {
+        get => _value;
+        set
+        {
+            if (SetProperty(ref _value, value))
+                OnPropertyChanged(nameof(DisplayValue));
+        }
+    }
+    public bool IsDigital
+    {
+        get => _isDigital;
+        set
+        {
+            if (SetProperty(ref _isDigital, value))
+                OnPropertyChanged(nameof(DisplayValue));
+        }
+    }
+    public bool IsEnabledInScope
+    {
+        get => _isEnabledInScope;
+        set
+        {
+            if (SetProperty(ref _isEnabledInScope, value))
+                OnPropertyChanged(nameof(ScopeToggleText));
+        }
+    }
+    public string ScopeToggleText => IsEnabledInScope ? "显示" : "隐藏";
+    public string TraceColorHex { get => _traceColorHex; set => SetProperty(ref _traceColorHex, value); }
+
     public string Note
     {
         get => _note;
         set
         {
-            if (_note != value)
+            if (SetProperty(ref _note, value ?? string.Empty))
             {
-                _note = value ?? string.Empty;
                 OnNoteChanged?.Invoke(ChannelId, _note);
             }
         }
@@ -173,17 +241,48 @@ public sealed class RegisterMonitorRow
 
     public Action<string, string>? OnNoteChanged { get; set; }
     public string DisplayValue => IsDigital ? (Value >= 0.5 ? "ON (1)" : "OFF (0)") : Value.ToString("G10");
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
-public sealed class ScopeChannelConfig
+public sealed class ScopeChannelConfig : INotifyPropertyChanged
 {
-    public string Id { get; set; } = string.Empty;
-    public string Label { get; set; } = string.Empty;
-    public string ColorHex { get; set; } = "#22D3EE";
-    public bool Enabled { get; set; } = true;
-    public bool IsDigital { get; set; }
-    public string LatestText { get; set; } = "—";
-    public string RangeText { get; set; } = string.Empty;
+    private string _id = string.Empty;
+    private string _label = string.Empty;
+    private string _colorHex = "#22D3EE";
+    private bool _enabled = true;
+    private bool _isDigital;
+    private string _latestText = "—";
+    private string _rangeText = string.Empty;
+
+    public string Id { get => _id; set => SetProperty(ref _id, value); }
+    public string Label { get => _label; set => SetProperty(ref _label, value); }
+    public string ColorHex { get => _colorHex; set => SetProperty(ref _colorHex, value); }
+    public bool Enabled { get => _enabled; set => SetProperty(ref _enabled, value); }
+    public bool IsDigital { get => _isDigital; set => SetProperty(ref _isDigital, value); }
+    public string LatestText { get => _latestText; set => SetProperty(ref _latestText, value); }
+    public string RangeText { get => _rangeText; set => SetProperty(ref _rangeText, value); }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
+    }
 }
 
 public sealed class ScopeSample

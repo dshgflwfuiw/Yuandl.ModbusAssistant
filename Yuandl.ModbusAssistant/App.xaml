@@ -12,6 +12,7 @@
             <conv:BoolToVisibilityConverter x:Key="InverseBoolToVis" Invert="True" />
             <conv:InverseBoolConverter x:Key="InverseBool" />
             <conv:HexColorToBrushConverter x:Key="HexToBrush" />
+            <conv:HexColorToContrastBrushConverter x:Key="HexToContrastBrush" />
             <conv:ChineseValueConverter x:Key="ChineseValueConverter" />
             <conv:NavigationWidthConverter x:Key="NavigationWidthConverter" />
 

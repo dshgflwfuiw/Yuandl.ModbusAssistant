@@ -59,7 +59,7 @@ const REGISTER_BYTE_ORDERS: ServerRegisterByteOrder[] = [
 const BYTE_ORDER_LABELS: Record<ServerRegisterByteOrder, string> = {
   BigEndian: 'ABCD 大端序',
   LittleEndian: 'DCBA 小端序',
-  WordSwap: 'CDAB 字交换',
+  WordSwap: 'CDAB 字交换（64位字逆序）',
   ByteSwap: 'BADC 字节交换',
 };
 

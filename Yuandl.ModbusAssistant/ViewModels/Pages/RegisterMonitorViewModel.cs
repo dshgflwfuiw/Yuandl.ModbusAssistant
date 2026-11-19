@@ -32,7 +32,7 @@ public enum TriggerEdgeMode
 
 public sealed class MonitorPollingData
 {
-    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public byte FunctionCode { get; init; }
     public ushort StartAddress { get; init; }
     public ushort Quantity { get; init; }
@@ -57,7 +57,7 @@ public sealed class MonitorPollingGroup : ObservableObject
     private bool _isEnabled = true;
     private string _lastStatus = "等待采集";
 
-    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public string Name { get => _name; set => SetProperty(ref _name, value); }
     public ModbusTransport Transport { get => _transport; set => SetProperty(ref _transport, value); }
     public byte UnitId { get => _unitId; set => SetProperty(ref _unitId, value); }
@@ -85,6 +85,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private readonly CommunicationService _comm;
     private readonly ModbusServerService _server;
     private readonly SettingsViewModel _settings;
+    private readonly PersistenceService _persistence;
     private readonly DispatcherTimer _pollTimer;
     private readonly Dictionary<string, string> _notesByKey = new();
     private readonly Dictionary<string, bool> _enabledOverrides = new();
@@ -93,11 +94,12 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private bool _isLoadingGroup;
     private const int SampleCapacity = 600;
 
-    public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server, SettingsViewModel settings)
+    public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server, SettingsViewModel settings, PersistenceService persistence)
     {
         _comm = comm;
         _server = server;
         _settings = settings;
+        _persistence = persistence;
 
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _pollTimer.Tick += async (_, _) => await OnTimerTickAsync();
@@ -115,10 +117,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         RemovePollingGroupCommand = new RelayCommand(RemoveSelectedPollingGroup, () => SelectedPollingGroup != null);
         AddPollingDataCommand = new RelayCommand(AddPollingData, () => SelectedPollingGroup != null);
         RemovePollingDataCommand = new RelayCommand(RemovePollingData);
-        var initialGroup = CreatePollingGroup("采集组 1");
-        PollingGroups.Add(initialGroup);
-        SelectedPollingGroup = initialGroup;
-        AddPollingData();
+        LoadPollingConfiguration();
         ToggleFreezeCommand = new RelayCommand(() =>
         {
             IsFrozen = !IsFrozen;
@@ -160,6 +159,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 LoadSelectedPollingGroup();
                 RemovePollingGroupCommand?.RaiseCanExecuteChanged();
                 AddPollingDataCommand?.RaiseCanExecuteChanged();
+                SavePollingConfiguration();
             }
         }
     }
@@ -378,6 +378,116 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         IntervalMs = IntervalMs
     };
 
+    private void LoadPollingConfiguration()
+    {
+        var config = _persistence.LoadMonitorConfiguration();
+        foreach (var note in config.ChannelNotes)
+            _notesByKey[note.Key] = note.Value;
+
+        foreach (var savedGroup in config.Groups)
+        {
+            var group = new MonitorPollingGroup
+            {
+                Id = savedGroup.Id,
+                Name = savedGroup.Name,
+                Transport = savedGroup.Transport,
+                UnitId = savedGroup.UnitId,
+                FunctionCode = savedGroup.FunctionCode,
+                StartAddress = savedGroup.StartAddress,
+                Quantity = savedGroup.Quantity,
+                DataType = savedGroup.DataType,
+                ByteOrder = savedGroup.ByteOrder,
+                Scale = savedGroup.Scale,
+                IntervalMs = savedGroup.IntervalMs,
+                IsEnabled = savedGroup.IsEnabled
+            };
+
+            foreach (var savedItem in savedGroup.DataItems)
+            {
+                group.DataItems.Add(new MonitorPollingData
+                {
+                    Id = savedItem.Id,
+                    FunctionCode = savedItem.FunctionCode,
+                    StartAddress = savedItem.StartAddress,
+                    Quantity = savedItem.Quantity,
+                    DataType = savedItem.DataType,
+                    ByteOrder = savedItem.ByteOrder,
+                    Scale = savedItem.Scale
+                });
+            }
+
+            AttachPollingGroup(group);
+            PollingGroups.Add(group);
+        }
+
+        SelectedPollingGroup = PollingGroups.FirstOrDefault(g => g.Id == config.SelectedGroupId)
+            ?? PollingGroups.FirstOrDefault();
+
+        if (PollingGroups.Count == 0)
+        {
+            var initialGroup = CreatePollingGroup("采集组 1");
+            AttachPollingGroup(initialGroup);
+            PollingGroups.Add(initialGroup);
+            SelectedPollingGroup = initialGroup;
+            AddPollingData();
+            SavePollingConfiguration();
+        }
+    }
+
+    private void AttachPollingGroup(MonitorPollingGroup group)
+    {
+        group.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(MonitorPollingGroup.Name)
+                or nameof(MonitorPollingGroup.Transport)
+                or nameof(MonitorPollingGroup.UnitId)
+                or nameof(MonitorPollingGroup.FunctionCode)
+                or nameof(MonitorPollingGroup.StartAddress)
+                or nameof(MonitorPollingGroup.Quantity)
+                or nameof(MonitorPollingGroup.DataType)
+                or nameof(MonitorPollingGroup.ByteOrder)
+                or nameof(MonitorPollingGroup.Scale)
+                or nameof(MonitorPollingGroup.IntervalMs)
+                or nameof(MonitorPollingGroup.IsEnabled))
+                SavePollingConfiguration();
+        };
+        group.DataItems.CollectionChanged += (_, _) => SavePollingConfiguration();
+    }
+
+    private void SavePollingConfiguration()
+    {
+        _persistence.SaveMonitorConfiguration(new MonitorConfiguration
+        {
+            SelectedGroupId = SelectedPollingGroup?.Id,
+            ChannelNotes = new Dictionary<string, string>(_notesByKey),
+            Groups = PollingGroups.Select(group => new MonitorPollingGroupConfiguration
+            {
+                Id = group.Id,
+                Name = group.Name,
+                Transport = group.Transport,
+                UnitId = group.UnitId,
+                FunctionCode = group.FunctionCode,
+                StartAddress = group.StartAddress,
+                Quantity = group.Quantity,
+                DataType = group.DataType,
+                ByteOrder = group.ByteOrder,
+                Scale = group.Scale,
+                IntervalMs = group.IntervalMs,
+                IsEnabled = group.IsEnabled,
+                DataItems = group.DataItems.Select(item => new MonitorPollingDataConfiguration
+                {
+                    Id = item.Id,
+                    FunctionCode = item.FunctionCode,
+                    StartAddress = item.StartAddress,
+                    Quantity = item.Quantity,
+                    DataType = item.DataType,
+                    ByteOrder = item.ByteOrder,
+                    Scale = item.Scale
+                }).ToList()
+            }).ToList()
+        });
+    }
+
     private void UpdateSelectedGroup(Action<MonitorPollingGroup> update)
     {
         if (!_isLoadingGroup && SelectedPollingGroup is { } group)
@@ -409,8 +519,10 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         while (PollingGroups.Any(g => g.Name == $"采集组 {index}")) index++;
         var group = CreatePollingGroup($"采集组 {index}");
         group.DataItems.Clear();
+        AttachPollingGroup(group);
         PollingGroups.Add(group);
         SelectedPollingGroup = group;
+        SavePollingConfiguration();
         StatusMessage = $"已添加 {group.Name}，配置地址范围后点击“添加数据到当前组”";
     }
 
@@ -428,6 +540,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             Scale = Scale
         };
         group.DataItems.Add(item);
+        SavePollingConfiguration();
         StatusMessage = $"已将 {item.DisplayName} 添加到 {group.Name}";
     }
 
@@ -435,6 +548,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     {
         if (SelectedPollingGroup is not { } group || parameter is not MonitorPollingData item) return;
         group.DataItems.Remove(item);
+        SavePollingConfiguration();
         string channelPrefix = $"{group.Id}_{item.Id}_";
         if (_latestRowsByGroup.TryGetValue(group.Id, out var groupRows))
         {
@@ -461,6 +575,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         }
 
         SelectedPollingGroup = PollingGroups.FirstOrDefault();
+        SavePollingConfiguration();
         RebuildRowsFromLatestGroups();
         StatusMessage = $"已删除 {group.Name}";
     }
@@ -538,6 +653,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     public void UpdateRowNote(string channelId, string note)
     {
         _notesByKey[channelId] = note;
+        SavePollingConfiguration();
         var ch = ScopeChannels.FirstOrDefault(c => c.Id == channelId);
         var row = Rows.FirstOrDefault(r => r.ChannelId == channelId);
         if (ch != null && row != null)
@@ -578,7 +694,6 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             }
 
             int successfulGroups = 0;
-            int channelCount = 0;
             foreach (var group in dueGroups)
             {
                 try
@@ -587,11 +702,11 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                     _latestRowsByGroup[group.Id] = newRows;
                     group.LastStatus = $"正常 · {DateTime.Now:HH:mm:ss}";
                     successfulGroups++;
-                    channelCount += newRows.Count;
                 }
                 catch (Exception ex)
                 {
                     group.LastStatus = $"失败 · {ex.Message}";
+                    _latestRowsByGroup.Remove(group.Id);
                 }
                 finally
                 {
@@ -600,8 +715,9 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 }
             }
 
-            ApplySampleBatch(_latestRowsByGroup.Values.SelectMany(rows => rows).ToList());
-            StatusMessage = $"采集完成：{successfulGroups}/{dueGroups.Count} 组成功，共 {channelCount} 个通道 @ {DateTime.Now:HH:mm:ss.fff}";
+            var latestRows = _latestRowsByGroup.Values.SelectMany(rows => rows).ToList();
+            ApplySampleBatch(latestRows);
+            StatusMessage = $"采集完成：{successfulGroups}/{dueGroups.Count} 组成功，当前 {latestRows.Count} 个通道 @ {DateTime.Now:HH:mm:ss.fff}";
         }
         catch (Exception ex)
         {
@@ -729,15 +845,38 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     private void ApplySampleBatch(List<RegisterMonitorRow> incoming)
     {
-        Rows.Clear();
+        var existingRows = Rows.ToDictionary(row => row.ChannelId, StringComparer.Ordinal);
+        var updatedRows = new List<RegisterMonitorRow>(incoming.Count);
         for (int i = 0; i < incoming.Count; i++)
         {
-            var row = incoming[i];
-            row.OnNoteChanged = UpdateRowNote;
-            row.IsEnabledInScope = _enabledOverrides.TryGetValue(row.ChannelId, out bool enabled)
-                ? enabled
-                : i < 6;
-            Rows.Add(row);
+            var sample = incoming[i];
+            if (existingRows.TryGetValue(sample.ChannelId, out var row))
+            {
+                row.Label = sample.Label;
+                row.Address = sample.Address;
+                row.RawValue = sample.RawValue;
+                row.Value = sample.Value;
+                row.IsDigital = sample.IsDigital;
+                row.TraceColorHex = sample.TraceColorHex;
+                row.OnNoteChanged = UpdateRowNote;
+            }
+            else
+            {
+                row = sample;
+                row.OnNoteChanged = UpdateRowNote;
+                row.IsEnabledInScope = _enabledOverrides.TryGetValue(row.ChannelId, out bool enabled)
+                    ? enabled
+                    : Rows.Count + updatedRows.Count < 6;
+            }
+
+            updatedRows.Add(row);
+        }
+
+        if (!Rows.Select(row => row.ChannelId).SequenceEqual(updatedRows.Select(row => row.ChannelId), StringComparer.Ordinal))
+        {
+            Rows.Clear();
+            foreach (var row in updatedRows)
+                Rows.Add(row);
         }
 
         if (!IsFrozen && incoming.Count > 0)
@@ -762,8 +901,8 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         DateTime endTime = Samples.Count > 0 ? Samples[^1].Timestamp : DateTime.Now;
         DateTime startTime = endTime.AddSeconds(-TimeWindowSec);
         var windowSamples = Samples.Where(s => s.Timestamp >= startTime).ToList();
-
-        ScopeChannels.Clear();
+        var existingChannels = ScopeChannels.ToDictionary(channel => channel.Id, StringComparer.Ordinal);
+        var updatedChannels = new List<ScopeChannelConfig>(Rows.Count);
         foreach (var row in Rows)
         {
             double min = double.MaxValue;
@@ -779,21 +918,28 @@ public sealed class RegisterMonitorViewModel : ObservableObject
                 }
             }
 
-            ScopeChannels.Add(new ScopeChannelConfig
-            {
-                Id = row.ChannelId,
-                Label = string.IsNullOrWhiteSpace(row.Note) ? row.Label : $"{row.Label} ({row.Note})",
-                ColorHex = row.TraceColorHex,
-                Enabled = row.IsEnabledInScope,
-                IsDigital = row.IsDigital,
-                LatestText = row.DisplayValue,
-                RangeText = !row.IsDigital && cnt > 0 ? $"[{min:0.##}..{max:0.##}]" : string.Empty
-            });
+            if (!existingChannels.TryGetValue(row.ChannelId, out var channel))
+                channel = new ScopeChannelConfig { Id = row.ChannelId };
+
+            channel.Label = string.IsNullOrWhiteSpace(row.Note) ? row.Label : $"{row.Label} ({row.Note})";
+            channel.ColorHex = row.TraceColorHex;
+            channel.Enabled = row.IsEnabledInScope;
+            channel.IsDigital = row.IsDigital;
+            channel.LatestText = row.DisplayValue;
+            channel.RangeText = !row.IsDigital && cnt > 0 ? $"[{min:0.##}..{max:0.##}]" : string.Empty;
+            updatedChannels.Add(channel);
         }
 
-        TriggerChannel = ScopeChannels.FirstOrDefault(c => c.Id == existingTriggerId)
-            ?? ScopeChannels.FirstOrDefault(c => c.Enabled)
-            ?? ScopeChannels.FirstOrDefault();
+        if (!ScopeChannels.Select(channel => channel.Id).SequenceEqual(updatedChannels.Select(channel => channel.Id), StringComparer.Ordinal))
+        {
+            ScopeChannels.Clear();
+            foreach (var channel in updatedChannels)
+                ScopeChannels.Add(channel);
+        }
+
+        TriggerChannel = updatedChannels.FirstOrDefault(c => c.Id == existingTriggerId)
+            ?? updatedChannels.FirstOrDefault(c => c.Enabled)
+            ?? updatedChannels.FirstOrDefault();
     }
 
     private void ExportCsv()

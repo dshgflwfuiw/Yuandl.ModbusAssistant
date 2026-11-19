@@ -49,7 +49,7 @@ const BYTE_ORDER_OPTIONS: RegisterByteOrder[] = [
 const BYTE_ORDER_LABELS: Record<RegisterByteOrder, string> = {
   BigEndian: 'ABCD 大端序',
   LittleEndian: 'DCBA 小端序',
-  WordSwap: 'CDAB 字交换',
+  WordSwap: 'CDAB 字交换（64位字逆序）',
   ByteSwap: 'BADC 字节交换',
 };
 const MAX_SCOPE_SAMPLES = 600;
