@@ -19,6 +19,15 @@
             <conv:ChineseValueConverter x:Key="ChineseValueConverter" />
             <conv:NavigationWidthConverter x:Key="NavigationWidthConverter" />
 
+            <DrawingImage x:Key="AppLogoIcon">
+                <DrawingImage.Drawing>
+                    <DrawingGroup>
+                        <GeometryDrawing Brush="#2563EB" Geometry="M 0,0 H 32 V 32 H 0 Z" />
+                        <GeometryDrawing Brush="White" Geometry="M 6,27 L 6,7 L 11,7 L 16,16 L 21,7 L 26,7 L 26,27 L 21,27 L 21,16 L 16,24 L 11,16 L 11,27 Z" />
+                    </DrawingGroup>
+                </DrawingImage.Drawing>
+            </DrawingImage>
+
             <Style TargetType="Border" x:Key="CardBorder">
                 <Setter Property="Background" Value="{DynamicResource BgSurfaceBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />

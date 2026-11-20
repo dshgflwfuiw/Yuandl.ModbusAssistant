@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using Xunit;
 using Yuandl.ModbusAssistant.Communication;
 using Yuandl.ModbusAssistant.Core.Enums;
+using Yuandl.ModbusAssistant.Core.Utils;
 using Yuandl.ModbusAssistant.Models;
 using Yuandl.ModbusAssistant.Protocol.Modbus;
 using Yuandl.ModbusAssistant.Services;
@@ -187,7 +188,12 @@ public class CommunicationStressTests
             while (!cts.IsCancellationRequested)
             {
                 var r = await echo.ReceiveAsync(cts.Token);
-                await echo.SendAsync(r.Buffer, r.RemoteEndPoint, cts.Token);
+                // Return a valid RTU read response. Echoing the request would
+                // be an invalid response because byte 2 is the address high byte,
+                // not the response byte count.
+                byte[] response = { r.Buffer[0], r.Buffer[1], 0x02, 0x00, 0x2A };
+                ushort crc = Crc16.Compute(response);
+                await echo.SendAsync(response.Append((byte)(crc & 0xFF)).Append((byte)(crc >> 8)).ToArray(), r.RemoteEndPoint, cts.Token);
             }
         });
 
@@ -203,7 +209,7 @@ public class CommunicationStressTests
 
             byte[] req = ModbusFrame.BuildRequest(1, 3, 0, 1, ModbusTransport.Rtu);
             byte[] resp = await comm.ExchangeModbusAsync(req, ModbusTransport.Rtu, timeoutMs: 1000, retries: 1);
-            Assert.Equal(req, resp);
+            Assert.Equal(new ushort[] { 42 }, ModbusFrame.ParseResponse(resp, ModbusTransport.Rtu).Registers);
         }
         finally
         {
@@ -211,5 +217,20 @@ public class CommunicationStressTests
             await comm.DisconnectAsync();
             try { await echoTask; } catch { }
         }
+    }
+
+    [Fact]
+    public async Task UdpChannel_CloseIsIdempotent_AndRejectsInvalidRemotePort()
+    {
+        using var invalid = new UdpChannel(new UdpParameters
+        {
+            RemoteHost = "127.0.0.1",
+            RemotePort = 0
+        });
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => invalid.OpenAsync());
+        await invalid.CloseAsync();
+        await invalid.CloseAsync();
+        Assert.Equal(ChannelState.Disconnected, invalid.State);
     }
 }

@@ -94,6 +94,7 @@ public sealed class ModbusDebugViewModel : ObservableObject
 
                 OnPropertyChanged(nameof(IsBatchWrite));
                 OnPropertyChanged(nameof(IsReadOrSingle));
+                OnPropertyChanged(nameof(IsWriteOperation));
                 OnPropertyChanged(nameof(QuantityOrValueLabel));
                 OnPropertyChanged(nameof(BatchListHint));
                 BuildPreview();
@@ -142,6 +143,14 @@ public sealed class ModbusDebugViewModel : ObservableObject
 
     public bool IsBatchWrite => SelectedFunction.Code is 15 or 16;
     public bool IsReadOrSingle => !IsBatchWrite;
+    public bool IsWriteOperation => SelectedFunction.Code is 5 or 6 or 15 or 16;
+
+    private bool _confirmWriteOperations;
+    public bool ConfirmWriteOperations
+    {
+        get => _confirmWriteOperations;
+        set => SetProperty(ref _confirmWriteOperations, value);
+    }
     public string QuantityOrValueLabel => SelectedFunction.Code switch
     {
         5 => "线圈值 (65280=ON, 0=OFF)",
@@ -196,6 +205,11 @@ public sealed class ModbusDebugViewModel : ObservableObject
         try
         {
             byte fn = SelectedFunction.Code;
+            if (IsWriteOperation && !ConfirmWriteOperations)
+            {
+                SummaryText = "写操作已拦截：请先确认写入操作";
+                return;
+            }
             if (UnitId == 0 && fn is 1 or 2 or 3 or 4)
             {
                 SummaryText = "参数提示：Modbus 广播地址 (站号 0) 仅支持写入功能码 (05/06/0F/10)";
