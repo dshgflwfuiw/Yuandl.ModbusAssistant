@@ -322,7 +322,7 @@
                                         <Button Style="{StaticResource SecondaryButton}" Content="恢复初始值" Command="{Binding ResetRegistersCommand}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SectionTitle}" Text="内置 Modbus 从站服务器 (TCP / 串口 RTU / 串口 ASCII / 双通道 + 在线改值)" Margin="0" VerticalAlignment="Center" />
+                                        <TextBlock Style="{StaticResource SectionTitle}" Text="Modbus 从站服务器" Margin="0" VerticalAlignment="Center" />
                                         <TextBlock Text=" [有未应用变更]" Foreground="{DynamicResource WarningBrush}" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="{Binding HasPendingRegisterChanges, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                 </DockPanel>
@@ -395,7 +395,7 @@
 
                                 <DockPanel Margin="0,0,0,10">
                                     <TextBlock DockPanel.Dock="Right"
-                                               Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}"
+                                               Visibility="Collapsed"
                                                Text="{Binding ServerLocalIpAddressesText, StringFormat='本机监听: {0}'}"
                                                FontFamily="Consolas"
                                                Foreground="{DynamicResource TextMutedBrush}"

@@ -550,12 +550,14 @@ public sealed class ConnectionViewModel : ObservableObject
         {
             var sorted = rawAddresses.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
             LocalIpAddressesText = string.Join("  |  ", sorted.Select(a => $"{a}:{TcpServer.ListenPort}"));
-            ServerLocalIpAddressesText = string.Join("  |  ", sorted.Select(a => $"{a}:{ServerPort}"));
+            // The server banner is intended as an address hint for peers;
+            // keep it focused on reachable IPs and avoid repeating the port.
+            ServerLocalIpAddressesText = string.Join("  |  ", sorted);
         }
         else
         {
             LocalIpAddressesText = $"127.0.0.1:{TcpServer.ListenPort}";
-            ServerLocalIpAddressesText = $"127.0.0.1:{ServerPort}";
+            ServerLocalIpAddressesText = "127.0.0.1";
         }
     }
 
