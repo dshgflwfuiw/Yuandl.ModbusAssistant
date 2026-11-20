@@ -262,7 +262,7 @@ public sealed class ModbusServerService : IDisposable
         if (needsTcp && port is < 0 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(port), "服务器端口必须在 1 至 65535 之间");
 
-        var normalizedSecurity = NormalizeSecurityOptions(securityOptions ?? SecurityOptions);
+        var normalizedSecurity = ModbusServerSecurityPolicy.Normalize(securityOptions ?? SecurityOptions);
         var bindIp = needsTcp ? ChannelSecurityHelper.ParseBindAddress(normalizedSecurity.BindAddress) : IPAddress.Loopback;
         var allowedIps = ChannelSecurityHelper.ParseAllowedIps(normalizedSecurity.AllowedClientIps);
 
@@ -333,16 +333,6 @@ public sealed class ModbusServerService : IDisposable
             throw;
         }
     }
-
-    private static ModbusServerSecurityOptions NormalizeSecurityOptions(ModbusServerSecurityOptions source) => new()
-    {
-        BindAddress = string.IsNullOrWhiteSpace(source.BindAddress) ? "127.0.0.1" : source.BindAddress.Trim(),
-        MaxClients = Math.Clamp(source.MaxClients, 1, 256),
-        IdleTimeoutMs = Math.Clamp(source.IdleTimeoutMs, 0, 3600000),
-        MaxFrameLength = Math.Clamp(source.MaxFrameLength, 16, 4096),
-        SendQueueLimit = Math.Clamp(source.SendQueueLimit, 1, 1024),
-        AllowedClientIps = source.AllowedClientIps?.Trim() ?? string.Empty
-    };
 
     public async Task StopAsync()
     {

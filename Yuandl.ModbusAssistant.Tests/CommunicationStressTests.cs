@@ -233,4 +233,16 @@ public class CommunicationStressTests
         await invalid.CloseAsync();
         Assert.Equal(ChannelState.Disconnected, invalid.State);
     }
+
+    [Fact]
+    public async Task CommunicationService_DisconnectIsIdempotent_WhenNeverConnected()
+    {
+        using var communication = new CommunicationService();
+
+        await communication.DisconnectAsync();
+        await communication.DisconnectAsync();
+
+        Assert.Equal(ChannelState.Disconnected, communication.State);
+        Assert.Empty(communication.ConnectedClients);
+    }
 }

@@ -205,7 +205,7 @@ public sealed class CommunicationService : IDisposable
         int normalizedTimeoutMs = Math.Clamp(timeoutMs, 100, 30000);
         int normalizedRetries = Math.Clamp(retries, 0, 10);
 
-        bool hasMeta = TryExtractRequestMeta(request, transport, out byte expectedUnitId, out byte expectedFn, out ushort? expectedTxId);
+        bool hasMeta = ModbusRequestMetadata.TryExtract(request, transport, out byte expectedUnitId, out byte expectedFn, out ushort? expectedTxId);
         if (hasMeta && expectedUnitId == 0 && expectedFn is 5 or 6 or 15 or 16)
         {
             await _serialExchangeLock.WaitAsync(cancellationToken);
@@ -486,50 +486,6 @@ public sealed class CommunicationService : IDisposable
             if (_pendingTcpTransactions.TryRemove(key, out var pending))
                 pending.Completion.TrySetException(new InvalidOperationException(reason));
         }
-    }
-
-    private static bool TryExtractRequestMeta(
-        byte[] request,
-        ModbusTransport transport,
-        out byte unitId,
-        out byte fn,
-        out ushort? transactionId)
-    {
-        unitId = 0;
-        fn = 0;
-        transactionId = null;
-
-        if (transport == ModbusTransport.Tcp)
-        {
-            if (request.Length < 8) return false;
-            transactionId = (ushort)((request[0] << 8) | request[1]);
-            unitId = request[6];
-            fn = request[7];
-            return true;
-        }
-
-        if (transport == ModbusTransport.Ascii)
-        {
-            if (request.Length < 7 || request[0] != (byte)':') return false;
-            try
-            {
-                string hex = Encoding.ASCII.GetString(request, 1, request.Length - 3);
-                var raw = ByteUtils.HexToBytes(hex);
-                if (raw.Length < 3) return false;
-                unitId = raw[0];
-                fn = raw[1];
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        if (request.Length < 4) return false;
-        unitId = request[0];
-        fn = request[1];
-        return true;
     }
 
     private static bool TryExtractMatchingFrame(

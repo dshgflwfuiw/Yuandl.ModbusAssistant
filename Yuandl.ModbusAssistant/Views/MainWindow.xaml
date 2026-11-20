@@ -62,14 +62,16 @@
                                                         <TextBlock Text="YUANDL" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
                                                         <TextBlock Text="MODBUS WORKBENCH" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="0,2,0,0" />
                                                     </StackPanel>
-                                                    <Button HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                     <!-- Legacy in-header collapse button removed; Logo is the single toggle target.
+                                                     <Button HorizontalAlignment="Right" VerticalAlignment="Center"
                                                             Width="30" Height="30" Padding="0"
                                                             Style="{StaticResource SecondaryButton}"
                                                              Visibility="Collapsed"
                                                             Command="{Binding ToggleNavigationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                             ToolTip="收起左侧菜单">
                                                         <TextBlock Text="&#xE76B;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
-                                                    </Button>
+                                                     </Button>
+                                                     -->
                                                 </Grid>
                                                  <Button Width="210"
                                                          Height="44"
@@ -81,14 +83,16 @@
                                                          BorderThickness="0"
                                                          ToolTip="展开或收起导航栏"
                                                          Command="{Binding ToggleNavigationCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
-                                                <Button HorizontalAlignment="Center"
+                                                 <!-- Legacy collapsed-state button removed; Logo remains clickable.
+                                                 <Button HorizontalAlignment="Center"
                                                         Width="36" Height="30" Padding="0" Margin="0,0,0,4"
                                                         Style="{StaticResource SecondaryButton}"
                                                          Visibility="Collapsed"
                                                         Command="{Binding ToggleNavigationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         ToolTip="展开左侧菜单">
                                                     <TextBlock Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
-                                                </Button>
+                                                 </Button>
+                                                 -->
                                                 <TextBlock Text="工作区" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="6,4,0,0"
                                                            Visibility="{Binding IsNavigationExpanded, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
                                             </StackPanel>
@@ -167,6 +171,7 @@
                         <!-- Client / Transport Channel Card -->
                         <Border Style="{StaticResource CardBorder}">
                             <StackPanel>
+                                <TextBlock Text="&#x5BA2;&#x6237;&#x7AEF;&#x901A;&#x9053;" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,6" />
                                 <TextBlock Style="{StaticResource SectionTitle}" Text="通讯通道配置 (串口 / TCP 客户端 / UDP / 无协议 TCP 服务端)" />
                                 <WrapPanel Margin="0,0,0,10">
                                     <StackPanel Width="200" Margin="0,0,12,8">
@@ -553,6 +558,7 @@
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="0">
                         <StackPanel>
+                            <TextBlock Text="&#x8BF7;&#x6C42;&#x53C2;&#x6570;" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,6" />
                             <TextBlock Style="{StaticResource SectionTitle}" Text="Modbus 主站请求构造与执行 (FC 01 - 10，支持 0F/10 批量写入)" />
                             <WrapPanel Margin="0,0,0,8">
                                 <StackPanel Width="110" Margin="0,0,10,8">
@@ -613,6 +619,7 @@
                                 </StackPanel>
                             </Border>
 
+                            <TextBlock Text="&#x62A5;&#x6587;&#x9884;&#x89C8;" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,6" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -699,14 +706,15 @@
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="间隔(ms)" />
                                     <TextBox Text="{Binding LoopIntervalMs}" Padding="5,4" />
                                 </StackPanel>
-                            </WrapPanel>
-                            <DockPanel>
+                             </WrapPanel>
+                             <TextBlock Text="&#x53D1;&#x9001;&#x533A;" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,6" />
+                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
                                     <Button Style="{StaticResource PrimaryButton}" Content="发送数据" Command="{Binding SendCommand}" Margin="0,0,8,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="导出日志" Command="{Binding ExportLogCommand}" Margin="0,0,8,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="清空记录" Command="{Binding ClearCommand}" />
                                 </StackPanel>
-                                <TextBox Text="{Binding PayloadText, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" Padding="8,6" />
+                                <TextBox Text="{Binding PayloadText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="64" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" Padding="8,6" />
                             </DockPanel>
                             <TextBlock Text="{Binding ErrorText}" Foreground="{DynamicResource DangerBrush}" Margin="0,6,0,0" />
                         </StackPanel>
@@ -959,7 +967,7 @@
                                 Style="{StaticResource CardBorder}"
                                 Margin="0"
                                 Visibility="{Binding ShowTable, Converter={StaticResource BoolToVis}}">
-                            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column">
+                            <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" CanUserAddRows="False" HeadersVisibility="Column" SelectionUnit="FullRow" CanUserSortColumns="True" EnableRowVirtualization="True" EnableColumnVirtualization="True">
                                 <DataGrid.Columns>
                                     <DataGridTemplateColumn Header="曲线" Width="75">
                                         <DataGridTemplateColumn.CellTemplate>
