@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using Yuandl.ModbusAssistant.Communication;
@@ -10,8 +11,21 @@ namespace Yuandl.ModbusAssistant.Services;
 
 public sealed class CommunicationService : IDisposable
 {
-    private readonly SemaphoreSlim _exchangeLock = new(1, 1);
+    private sealed class PendingTcpTransaction
+    {
+        public required ushort WireTxId { get; init; }
+        public required ushort OriginalTxId { get; init; }
+        public required byte ExpectedUnitId { get; init; }
+        public required byte ExpectedFunctionCode { get; init; }
+        public required TaskCompletionSource<byte[]> Completion { get; init; }
+    }
+
+    private readonly SemaphoreSlim _serialExchangeLock = new(1, 1);
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly ConcurrentDictionary<ushort, PendingTcpTransaction> _pendingTcpTransactions = new();
+    private readonly List<byte> _tcpRxAccumulator = new();
+    private readonly object _tcpAccumulatorLock = new();
+    private int _wireTxSequence;
     private IChannel? _activeChannel;
 
     public ChannelState State => _activeChannel?.State ?? ChannelState.Disconnected;
@@ -89,12 +103,15 @@ public sealed class CommunicationService : IDisposable
     {
         await DisconnectAsync();
         await OpenChannelAsync(new TcpServerChannel(parameters));
-        ActiveEndpointLabel = $"TCP 服务端 :{parameters.ListenPort}";
+        ActiveEndpointLabel = $"TCP 服务端 {parameters.BindAddress}:{parameters.ListenPort}";
         AppLogger.Info($"串口/TCP 透明服务端监听已启动: {ActiveEndpointLabel}");
     }
 
     private async Task OpenChannelAsync(IChannel channel)
     {
+        lock (_tcpAccumulatorLock)
+            _tcpRxAccumulator.Clear();
+
         channel.StateChanged += OnChannelStateChanged;
         channel.DataReceived += OnChannelDataReceived;
         channel.ErrorOccurred += OnChannelErrorOccurred;
@@ -115,6 +132,10 @@ public sealed class CommunicationService : IDisposable
 
     public async Task DisconnectAsync()
     {
+        CancelAllPendingTcpTransactions("通讯连接已断开");
+        lock (_tcpAccumulatorLock)
+            _tcpRxAccumulator.Clear();
+
         var ch = _activeChannel;
         _activeChannel = null;
         ActiveEndpointLabel = string.Empty;
@@ -177,7 +198,8 @@ public sealed class CommunicationService : IDisposable
         if (request == null || request.Length == 0)
             throw new ArgumentException("Modbus 请求报文不能为空", nameof(request));
 
-        if (_activeChannel == null || _activeChannel.State != ChannelState.Connected)
+        var activeChannel = _activeChannel;
+        if (activeChannel == null || activeChannel.State != ChannelState.Connected)
             throw new InvalidOperationException("请先在通讯连接页建立连接");
 
         int normalizedTimeoutMs = Math.Clamp(timeoutMs, 100, 30000);
@@ -186,7 +208,7 @@ public sealed class CommunicationService : IDisposable
         bool hasMeta = TryExtractRequestMeta(request, transport, out byte expectedUnitId, out byte expectedFn, out ushort? expectedTxId);
         if (hasMeta && expectedUnitId == 0 && expectedFn is 5 or 6 or 15 or 16)
         {
-            await _exchangeLock.WaitAsync(cancellationToken);
+            await _serialExchangeLock.WaitAsync(cancellationToken);
             try
             {
                 await SendAsync(request, null, cancellationToken);
@@ -195,15 +217,151 @@ public sealed class CommunicationService : IDisposable
             }
             finally
             {
-                _exchangeLock.Release();
+                _serialExchangeLock.Release();
             }
         }
 
-        await _exchangeLock.WaitAsync(cancellationToken);
+        // TCP client + Modbus TCP transport supports concurrent in-flight transactions keyed by TxId
+        if (activeChannel is TcpClientChannel && transport == ModbusTransport.Tcp && hasMeta && expectedTxId.HasValue)
+        {
+            return await ExchangeTcpMultiplexedAsync(
+                request,
+                expectedTxId.Value,
+                expectedUnitId,
+                expectedFn,
+                normalizedTimeoutMs,
+                normalizedRetries,
+                cancellationToken);
+        }
+
+        // Serial / UDP / RTU / ASCII remain strictly serialized per physical bus semantics
+        return await ExchangeSerializedAsync(
+            request,
+            transport,
+            hasMeta ? expectedTxId : null,
+            hasMeta ? expectedUnitId : null,
+            hasMeta ? expectedFn : null,
+            normalizedTimeoutMs,
+            normalizedRetries,
+            cancellationToken);
+    }
+
+    private async Task<byte[]> ExchangeTcpMultiplexedAsync(
+        byte[] request,
+        ushort originalTxId,
+        byte expectedUnitId,
+        byte expectedFn,
+        int timeoutMs,
+        int retries,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        int maxAttempts = Math.Max(1, retries + 1);
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var channel = _activeChannel;
+            if (channel == null || channel.State != ChannelState.Connected)
+                throw new InvalidOperationException("通讯连接已断开");
+
+            var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            ushort wireTxId = AllocateUniqueWireTxId(originalTxId, expectedUnitId, expectedFn, tcs);
+            byte[] wireFrame = request;
+            if (wireTxId != originalTxId)
+            {
+                wireFrame = request.ToArray();
+                wireFrame[0] = (byte)(wireTxId >> 8);
+                wireFrame[1] = (byte)(wireTxId & 0xFF);
+            }
+
+            try
+            {
+                await SendAsync(wireFrame, null, cancellationToken);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(timeoutMs);
+                using var reg = timeoutCts.Token.Register(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        tcs.TrySetCanceled(cancellationToken);
+                    else
+                        tcs.TrySetException(new TimeoutException("Modbus TCP 响应超时"));
+                });
+
+                byte[] response = await tcs.Task;
+                if (wireTxId != originalTxId && response.Length >= 2)
+                {
+                    response[0] = (byte)(originalTxId >> 8);
+                    response[1] = (byte)(originalTxId & 0xFF);
+                }
+                return response;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                lastException = ex;
+                AppLogger.Warn($"Modbus TCP 事务 #{wireTxId} 尝试 {attempt + 1}/{maxAttempts} 失败: {ex.Message}");
+            }
+            finally
+            {
+                _pendingTcpTransactions.TryRemove(wireTxId, out _);
+            }
+        }
+
+        throw lastException ?? new TimeoutException("Modbus TCP 请求未收到响应");
+    }
+
+    private ushort AllocateUniqueWireTxId(
+        ushort preferredTxId,
+        byte expectedUnitId,
+        byte expectedFn,
+        TaskCompletionSource<byte[]> completion)
+    {
+        var candidate = new PendingTcpTransaction
+        {
+            WireTxId = preferredTxId,
+            OriginalTxId = preferredTxId,
+            ExpectedUnitId = expectedUnitId,
+            ExpectedFunctionCode = expectedFn,
+            Completion = completion
+        };
+
+        if (_pendingTcpTransactions.TryAdd(preferredTxId, candidate))
+            return preferredTxId;
+
+        for (int i = 0; i < 65535; i++)
+        {
+            ushort nextId = (ushort)((Interlocked.Increment(ref _wireTxSequence) & 0xFFFF) == 0
+                ? Interlocked.Increment(ref _wireTxSequence)
+                : _wireTxSequence);
+            var allocated = new PendingTcpTransaction
+            {
+                WireTxId = nextId,
+                OriginalTxId = preferredTxId,
+                ExpectedUnitId = expectedUnitId,
+                ExpectedFunctionCode = expectedFn,
+                Completion = completion
+            };
+            if (_pendingTcpTransactions.TryAdd(nextId, allocated))
+                return nextId;
+        }
+
+        throw new InvalidOperationException("TCP 并发事务表已满");
+    }
+
+    private async Task<byte[]> ExchangeSerializedAsync(
+        byte[] request,
+        ModbusTransport transport,
+        ushort? expectedTxId,
+        byte? expectedUnitId,
+        byte? expectedFn,
+        int timeoutMs,
+        int retries,
+        CancellationToken cancellationToken)
+    {
+        await _serialExchangeLock.WaitAsync(cancellationToken);
         try
         {
             Exception? lastException = null;
-            int maxAttempts = Math.Max(1, normalizedRetries + 1);
+            int maxAttempts = Math.Max(1, retries + 1);
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
@@ -225,9 +383,9 @@ public sealed class CommunicationService : IDisposable
                         if (TryExtractMatchingFrame(
                                 accumulator,
                                 transport,
-                                hasMeta ? expectedTxId : null,
-                                hasMeta ? expectedUnitId : null,
-                                hasMeta ? expectedFn : null,
+                                expectedTxId,
+                                expectedUnitId,
+                                expectedFn,
                                 out var matched))
                         {
                             tcs.TrySetResult(matched);
@@ -240,8 +398,14 @@ public sealed class CommunicationService : IDisposable
                 {
                     await SendAsync(request, null, cancellationToken);
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeoutCts.CancelAfter(normalizedTimeoutMs);
-                    using var reg = timeoutCts.Token.Register(() => tcs.TrySetException(new TimeoutException("Modbus 响应超时")));
+                    timeoutCts.CancelAfter(timeoutMs);
+                    using var reg = timeoutCts.Token.Register(() =>
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                            tcs.TrySetCanceled(cancellationToken);
+                        else
+                            tcs.TrySetException(new TimeoutException("Modbus 响应超时"));
+                    });
 
                     return await tcs.Task;
                 }
@@ -259,7 +423,68 @@ public sealed class CommunicationService : IDisposable
         }
         finally
         {
-            _exchangeLock.Release();
+            _serialExchangeLock.Release();
+        }
+    }
+
+    private void DispatchPendingTcpFrames(byte[] bytes)
+    {
+        if (_pendingTcpTransactions.IsEmpty)
+            return;
+
+        lock (_tcpAccumulatorLock)
+        {
+            _tcpRxAccumulator.AddRange(bytes);
+            if (_tcpRxAccumulator.Count > 32768)
+                _tcpRxAccumulator.RemoveRange(0, _tcpRxAccumulator.Count - 32768);
+
+            while (_tcpRxAccumulator.Count >= 7)
+            {
+                int protocolId = (_tcpRxAccumulator[2] << 8) | _tcpRxAccumulator[3];
+                int declaredLength = (_tcpRxAccumulator[4] << 8) | _tcpRxAccumulator[5];
+                if (protocolId != 0 || declaredLength is < 2 or > 260)
+                {
+                    _tcpRxAccumulator.RemoveAt(0);
+                    continue;
+                }
+
+                int totalLength = 6 + declaredLength;
+                if (_tcpRxAccumulator.Count < totalLength)
+                    break;
+
+                var frame = _tcpRxAccumulator.GetRange(0, totalLength).ToArray();
+                _tcpRxAccumulator.RemoveRange(0, totalLength);
+
+                if (frame.Length < 8)
+                    continue;
+
+                ushort respTxId = (ushort)((frame[0] << 8) | frame[1]);
+                byte respUnitId = frame[6];
+                byte respFn = frame[7];
+
+                if (_pendingTcpTransactions.TryGetValue(respTxId, out var pending))
+                {
+                    if (respUnitId == pending.ExpectedUnitId &&
+                        (respFn == pending.ExpectedFunctionCode || respFn == (byte)(pending.ExpectedFunctionCode | 0x80)))
+                    {
+                        _pendingTcpTransactions.TryRemove(respTxId, out _);
+                        pending.Completion.TrySetResult(frame);
+                    }
+                    else
+                    {
+                        AppLogger.Warn($"丢弃参数失配 Modbus TCP 帧: Tx={respTxId}, Unit={respUnitId}/{pending.ExpectedUnitId}, Fn=0x{respFn:X2}/0x{pending.ExpectedFunctionCode:X2}");
+                    }
+                }
+            }
+        }
+    }
+
+    private void CancelAllPendingTcpTransactions(string reason)
+    {
+        foreach (var key in _pendingTcpTransactions.Keys.ToArray())
+        {
+            if (_pendingTcpTransactions.TryRemove(key, out var pending))
+                pending.Completion.TrySetException(new InvalidOperationException(reason));
         }
     }
 
@@ -482,10 +707,22 @@ public sealed class CommunicationService : IDisposable
         return false;
     }
 
-    private void OnChannelStateChanged(object? sender, ChannelState state) => StateChanged?.Invoke(this, state);
+    private void OnChannelStateChanged(object? sender, ChannelState state)
+    {
+        if (state is ChannelState.Disconnected or ChannelState.Faulted or ChannelState.Reconnecting)
+        {
+            CancelAllPendingTcpTransactions($"通讯状态切换为 {state}");
+            lock (_tcpAccumulatorLock)
+                _tcpRxAccumulator.Clear();
+        }
+        StateChanged?.Invoke(this, state);
+    }
 
     private void OnChannelDataReceived(object? sender, ChannelDataReceivedEventArgs e)
     {
+        if (_activeChannel is TcpClientChannel && !_pendingTcpTransactions.IsEmpty)
+            DispatchPendingTcpFrames(e.Bytes);
+
         DataReceived?.Invoke(this, e);
         TrafficCaptured?.Invoke(this, new TrafficEventArgs
         {
@@ -515,7 +752,7 @@ public sealed class CommunicationService : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
         _ = DisconnectAsync();
-        _exchangeLock.Dispose();
+        _serialExchangeLock.Dispose();
         _sendLock.Dispose();
     }
 }

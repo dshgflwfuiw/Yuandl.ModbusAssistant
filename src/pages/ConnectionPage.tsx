@@ -88,8 +88,23 @@ export const ConnectionPage: React.FC = () => {
   const [serverMode, setServerMode] = useState<ModbusServerTransportMode>(
     status.serverMode || 'Tcp'
   );
+  const [serverBindAddress, setServerBindAddress] = useState<string>(
+    status.serverSecurity?.bindAddress || '127.0.0.1'
+  );
   const [serverPort, setServerPort] = useState<number>(status.serverPort || 5020);
   const [serverStation, setServerStation] = useState<number>(status.serverStation || 1);
+  const [serverMaxClients, setServerMaxClients] = useState<number>(
+    status.serverSecurity?.maxClients || 32
+  );
+  const [serverIdleTimeoutMs, setServerIdleTimeoutMs] = useState<number>(
+    status.serverSecurity?.idleTimeoutMs ?? 60000
+  );
+  const [serverMaxFrameLength, setServerMaxFrameLength] = useState<number>(
+    status.serverSecurity?.maxFrameLength || 260
+  );
+  const [serverAllowedClientIps, setServerAllowedClientIps] = useState<string>(
+    status.serverSecurity?.allowedClientIps || ''
+  );
   const [serverSerial, setServerSerial] = useState<SerialPortParameters>(
     status.serverSerial || {
       portName: 'COM1',
@@ -119,7 +134,20 @@ export const ConnectionPage: React.FC = () => {
     if (status.serverStation) setServerStation(status.serverStation);
     if (status.serverMode) setServerMode(status.serverMode);
     if (status.serverSerial) setServerSerial(status.serverSerial);
-  }, [status.serverPort, status.serverStation, status.serverMode, status.serverSerial]);
+    if (status.serverSecurity) {
+      setServerBindAddress(status.serverSecurity.bindAddress);
+      setServerMaxClients(status.serverSecurity.maxClients);
+      setServerIdleTimeoutMs(status.serverSecurity.idleTimeoutMs);
+      setServerMaxFrameLength(status.serverSecurity.maxFrameLength);
+      setServerAllowedClientIps(status.serverSecurity.allowedClientIps);
+    }
+  }, [
+    status.serverPort,
+    status.serverStation,
+    status.serverMode,
+    status.serverSerial,
+    status.serverSecurity,
+  ]);
 
   const handleRefreshPorts = () => {
     setAvailablePorts(['COM1', 'COM2', 'COM3', '/dev/ttyUSB0']);
@@ -166,7 +194,12 @@ export const ConnectionPage: React.FC = () => {
         await connectChannel({
           type: 'TcpServer',
           tcpServer: {
+            bindAddress: commForm.tcpServerBindAddress,
             listenPort: commForm.tcpServerPort,
+            maxClients: commForm.tcpServerMaxClients,
+            idleTimeoutMs: commForm.tcpServerIdleTimeoutMs,
+            maxFrameLength: commForm.tcpServerMaxFrameLength,
+            allowedClientIps: commForm.tcpServerAllowedClientIps,
           },
         });
       }
@@ -209,9 +242,14 @@ export const ConnectionPage: React.FC = () => {
     serial: SerialPortParameters = serverSerial
   ) => {
     persistServerConfig({
-      version: 1,
+      version: 2,
+      bindAddress: serverBindAddress,
       port,
       station,
+      maxClients: serverMaxClients,
+      idleTimeoutMs: serverIdleTimeoutMs,
+      maxFrameLength: serverMaxFrameLength,
+      allowedClientIps: serverAllowedClientIps,
       serverMode: mode,
       serverSerial: serial,
       registers: regs.map(({ currentValue: _cv, ...rest }) => rest),
@@ -228,6 +266,13 @@ export const ConnectionPage: React.FC = () => {
           station: serverStation,
           mode: serverMode,
           serial: serverSerial,
+          security: {
+            bindAddress: serverBindAddress,
+            maxClients: serverMaxClients,
+            idleTimeoutMs: serverIdleTimeoutMs,
+            maxFrameLength: serverMaxFrameLength,
+            allowedClientIps: serverAllowedClientIps,
+          },
         }),
       });
       const data = await res.json();
@@ -441,9 +486,14 @@ export const ConnectionPage: React.FC = () => {
 
   const handleExportJson = () => {
     const payload: ModbusServerConfiguration = {
-      version: 1,
+      version: 2,
+      bindAddress: serverBindAddress,
       port: serverPort,
       station: serverStation,
+      maxClients: serverMaxClients,
+      idleTimeoutMs: serverIdleTimeoutMs,
+      maxFrameLength: serverMaxFrameLength,
+      allowedClientIps: serverAllowedClientIps,
       serverMode,
       serverSerial,
       registers: status.serverRegisters.map(
@@ -482,6 +532,11 @@ export const ConnectionPage: React.FC = () => {
       const nextSerial = parsed.serverSerial ?? serverSerial;
       setServerPort(parsed.port);
       setServerStation(parsed.station);
+      if (parsed.bindAddress) setServerBindAddress(parsed.bindAddress);
+      if (parsed.maxClients) setServerMaxClients(parsed.maxClients);
+      if (parsed.idleTimeoutMs !== undefined) setServerIdleTimeoutMs(parsed.idleTimeoutMs);
+      if (parsed.maxFrameLength) setServerMaxFrameLength(parsed.maxFrameLength);
+      if (parsed.allowedClientIps !== undefined) setServerAllowedClientIps(parsed.allowedClientIps);
       if (parsed.serverMode) setServerMode(parsed.serverMode);
       if (parsed.serverSerial) setServerSerial(parsed.serverSerial);
       syncLocalServerConfig(
@@ -835,10 +890,28 @@ export const ConnectionPage: React.FC = () => {
                 支持多客户端同时连接，在「无协议调试」中按客户端会话定向收发
               </span>
             </div>
-            <div className="flex flex-wrap gap-4">
-              <div className="w-48">
+            <div className="flex flex-wrap gap-3">
+              <div className="w-40">
                 <label className="block text-xs text-[var(--text-secondary)] mb-1">
-                  本地监听端口 (Port)
+                  绑定地址 (Bind)
+                </label>
+                <input
+                  type="text"
+                  value={commForm.tcpServerBindAddress}
+                  disabled={status.isConnected}
+                  placeholder="127.0.0.1 / 0.0.0.0"
+                  onChange={(e) =>
+                    setCommForm((p) => ({
+                      ...p,
+                      tcpServerBindAddress: e.target.value,
+                    }))
+                  }
+                  className="fluent-input w-full"
+                />
+              </div>
+              <div className="w-32">
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  本地监听端口
                 </label>
                 <input
                   type="number"
@@ -850,6 +923,81 @@ export const ConnectionPage: React.FC = () => {
                     setCommForm((p) => ({
                       ...p,
                       tcpServerPort: Number(e.target.value),
+                    }))
+                  }
+                  className="fluent-input w-full"
+                />
+              </div>
+              <div className="w-28">
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  最大客户端数
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={256}
+                  value={commForm.tcpServerMaxClients}
+                  disabled={status.isConnected}
+                  onChange={(e) =>
+                    setCommForm((p) => ({
+                      ...p,
+                      tcpServerMaxClients: Number(e.target.value),
+                    }))
+                  }
+                  className="fluent-input w-full"
+                />
+              </div>
+              <div className="w-32">
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  空闲超时 (ms)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3600000}
+                  value={commForm.tcpServerIdleTimeoutMs}
+                  disabled={status.isConnected}
+                  onChange={(e) =>
+                    setCommForm((p) => ({
+                      ...p,
+                      tcpServerIdleTimeoutMs: Number(e.target.value),
+                    }))
+                  }
+                  className="fluent-input w-full"
+                />
+              </div>
+              <div className="w-32">
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  单包上限 (B)
+                </label>
+                <input
+                  type="number"
+                  min={64}
+                  max={65536}
+                  value={commForm.tcpServerMaxFrameLength}
+                  disabled={status.isConnected}
+                  onChange={(e) =>
+                    setCommForm((p) => ({
+                      ...p,
+                      tcpServerMaxFrameLength: Number(e.target.value),
+                    }))
+                  }
+                  className="fluent-input w-full"
+                />
+              </div>
+              <div className="w-56">
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  IP 白名单 (逗号分隔, 空=不限)
+                </label>
+                <input
+                  type="text"
+                  value={commForm.tcpServerAllowedClientIps}
+                  disabled={status.isConnected}
+                  placeholder="例如 127.0.0.1,192.168.1.10"
+                  onChange={(e) =>
+                    setCommForm((p) => ({
+                      ...p,
+                      tcpServerAllowedClientIps: e.target.value,
                     }))
                   }
                   className="fluent-input w-full"
@@ -1001,18 +1149,87 @@ export const ConnectionPage: React.FC = () => {
           </div>
 
           {(serverMode === 'Tcp' || serverMode === 'TcpAndSerial') && (
-            <div>
-              <label className="block text-xs text-[var(--text-secondary)] mb-1">
-                TCP 监听端口
-              </label>
-              <input
-                type="number"
-                value={serverPort}
-                disabled={status.isServerRunning}
-                onChange={(e) => setServerPort(Number(e.target.value))}
-                className="fluent-input w-28"
-              />
-            </div>
+            <>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  绑定地址 (Bind)
+                </label>
+                <input
+                  type="text"
+                  value={serverBindAddress}
+                  disabled={status.isServerRunning}
+                  onChange={(e) => setServerBindAddress(e.target.value)}
+                  className="fluent-input w-36"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  TCP 监听端口
+                </label>
+                <input
+                  type="number"
+                  value={serverPort}
+                  disabled={status.isServerRunning}
+                  onChange={(e) => setServerPort(Number(e.target.value))}
+                  className="fluent-input w-24"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  最大客户端
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={256}
+                  value={serverMaxClients}
+                  disabled={status.isServerRunning}
+                  onChange={(e) => setServerMaxClients(Number(e.target.value))}
+                  className="fluent-input w-24"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  空闲超时 (ms)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3600000}
+                  value={serverIdleTimeoutMs}
+                  disabled={status.isServerRunning}
+                  onChange={(e) => setServerIdleTimeoutMs(Number(e.target.value))}
+                  className="fluent-input w-28"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  单帧上限 (B)
+                </label>
+                <input
+                  type="number"
+                  min={16}
+                  max={4096}
+                  value={serverMaxFrameLength}
+                  disabled={status.isServerRunning}
+                  onChange={(e) => setServerMaxFrameLength(Number(e.target.value))}
+                  className="fluent-input w-24"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--text-secondary)] mb-1">
+                  IP 白名单
+                </label>
+                <input
+                  type="text"
+                  value={serverAllowedClientIps}
+                  disabled={status.isServerRunning}
+                  placeholder="空=不限"
+                  onChange={(e) => setServerAllowedClientIps(e.target.value)}
+                  className="fluent-input w-44"
+                />
+              </div>
+            </>
           )}
 
           {serverMode !== 'Tcp' && (

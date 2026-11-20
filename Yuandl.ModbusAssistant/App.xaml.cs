@@ -1,10 +1,41 @@
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using Yuandl.ModbusAssistant.Services;
 using Yuandl.ModbusAssistant.ViewModels;
 using Yuandl.ModbusAssistant.Views;
+using Yuandl.ThemeUI.Appearance;
+using Yuandl.ThemeUI.Controls;
 
 namespace Yuandl.ModbusAssistant;
+
+public static class ThemeUiStartupVerifier
+{
+    public static void VerifyOrThrow(ResourceDictionary? appResources = null)
+    {
+        Assembly themeAssembly = typeof(FluentWindow).Assembly;
+        var assemblyName = themeAssembly.GetName();
+        if (!string.Equals(assemblyName.Name, "Yuandl.ThemeUI", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Yuandl.ThemeUI 程序集名称异常: {assemblyName.FullName}");
+
+        if (appResources != null)
+        {
+            bool hasControlsOrThemeDict = appResources.MergedDictionaries.Any(d =>
+            {
+                string typeName = d.GetType().FullName ?? string.Empty;
+                string sourceStr = d.Source?.OriginalString ?? string.Empty;
+                return typeName.StartsWith("Yuandl.ThemeUI", StringComparison.Ordinal) ||
+                       sourceStr.Contains("Yuandl.ThemeUI", StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (!hasControlsOrThemeDict)
+                throw new InvalidOperationException("Application.Resources 未加载 Yuandl.ThemeUI 主题或控件资源字典");
+
+            if (!appResources.Contains("CardBorder") || appResources["BgCanvasBrush"] == null)
+                throw new InvalidOperationException("应用核心主题画刷或卡片样式资源缺失");
+        }
+    }
+}
 
 public partial class App : Application
 {
@@ -19,6 +50,22 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         AppLogger.Info("Yuandl.ModbusAssistant 启动");
+
+        try
+        {
+            ThemeUiStartupVerifier.VerifyOrThrow(Resources);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Fatal("Yuandl.ThemeUI 启动自检失败", ex);
+            MessageBox.Show(
+                $"界面主题组件 (Yuandl.ThemeUI 2.0.7) 初始化检查失败，程序无法在缺失主题资源下运行：\n{ex.Message}",
+                "Yuandl.ModbusAssistant 启动检查失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(-1);
+            return;
+        }
 
         _mainViewModel = new MainViewModel();
         ApplyTheme(_mainViewModel.Settings.IsDarkTheme);
@@ -56,9 +103,20 @@ public partial class App : Application
 
     public void ApplyTheme(bool isDark)
     {
+        ApplicationThemeManager.Apply(isDark ? ApplicationTheme.Dark : ApplicationTheme.Light);
+
         string themeFile = isDark ? "Themes/DarkTheme.xaml" : "Themes/LightTheme.xaml";
         var source = new Uri($"pack://application:,,,/Yuandl.ModbusAssistant;component/{themeFile}", UriKind.Absolute);
-        Resources.MergedDictionaries.Clear();
+
+        for (int i = Resources.MergedDictionaries.Count - 1; i >= 0; i--)
+        {
+            string existing = Resources.MergedDictionaries[i].Source?.OriginalString ?? string.Empty;
+            if (existing.EndsWith("Themes/LightTheme.xaml", StringComparison.OrdinalIgnoreCase) ||
+                existing.EndsWith("Themes/DarkTheme.xaml", StringComparison.OrdinalIgnoreCase))
+            {
+                Resources.MergedDictionaries.RemoveAt(i);
+            }
+        }
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = source });
     }
 

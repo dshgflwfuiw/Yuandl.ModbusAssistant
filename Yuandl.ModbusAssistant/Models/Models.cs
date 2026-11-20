@@ -90,20 +90,75 @@ public sealed class UdpParameters : INotifyPropertyChanged
 
 public sealed class TcpServerParameters : INotifyPropertyChanged
 {
+    private string _bindAddress = "127.0.0.1";
     private int _listenPort = 6000;
+    private int _maxClients = 32;
+    private int _idleTimeoutMs = 60000;
+    private int _maxFrameLength = 4096;
+    private int _sendQueueLimit = 64;
+    private string _allowedClientIps = string.Empty;
+
+    public string BindAddress
+    {
+        get => _bindAddress;
+        set => SetProperty(ref _bindAddress, string.IsNullOrWhiteSpace(value) ? "127.0.0.1" : value.Trim());
+    }
 
     public int ListenPort
     {
         get => _listenPort;
-        set
-        {
-            if (_listenPort == value) return;
-            _listenPort = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ListenPort)));
-        }
+        set => SetProperty(ref _listenPort, Math.Clamp(value, 1, 65535));
     }
 
+    public int MaxClients
+    {
+        get => _maxClients;
+        set => SetProperty(ref _maxClients, Math.Clamp(value, 1, 256));
+    }
+
+    public int IdleTimeoutMs
+    {
+        get => _idleTimeoutMs;
+        set => SetProperty(ref _idleTimeoutMs, Math.Clamp(value, 0, 3600000));
+    }
+
+    public int MaxFrameLength
+    {
+        get => _maxFrameLength;
+        set => SetProperty(ref _maxFrameLength, Math.Clamp(value, 64, 65536));
+    }
+
+    public int SendQueueLimit
+    {
+        get => _sendQueueLimit;
+        set => SetProperty(ref _sendQueueLimit, Math.Clamp(value, 1, 1024));
+    }
+
+    public string AllowedClientIps
+    {
+        get => _allowedClientIps;
+        set => SetProperty(ref _allowedClientIps, value ?? string.Empty);
+    }
+
+    public TcpServerParameters Clone() => new()
+    {
+        BindAddress = BindAddress,
+        ListenPort = ListenPort,
+        MaxClients = MaxClients,
+        IdleTimeoutMs = IdleTimeoutMs,
+        MaxFrameLength = MaxFrameLength,
+        SendQueueLimit = SendQueueLimit,
+        AllowedClientIps = AllowedClientIps
+    };
+
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public sealed class TcpServerClientSession
@@ -132,11 +187,37 @@ public sealed class ServerRegisterDefinition
     public string CurrentValue { get; set; } = "0";
 }
 
+public sealed class ModbusServerSecurityOptions
+{
+    public string BindAddress { get; set; } = "127.0.0.1";
+    public int MaxClients { get; set; } = 32;
+    public int IdleTimeoutMs { get; set; } = 60000;
+    public int MaxFrameLength { get; set; } = 260;
+    public int SendQueueLimit { get; set; } = 64;
+    public string AllowedClientIps { get; set; } = string.Empty;
+
+    public ModbusServerSecurityOptions Clone() => new()
+    {
+        BindAddress = BindAddress,
+        MaxClients = MaxClients,
+        IdleTimeoutMs = IdleTimeoutMs,
+        MaxFrameLength = MaxFrameLength,
+        SendQueueLimit = SendQueueLimit,
+        AllowedClientIps = AllowedClientIps
+    };
+}
+
 public sealed class ModbusServerConfiguration
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
+    public string BindAddress { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 5020;
     public int Station { get; set; } = 1;
+    public int MaxClients { get; set; } = 32;
+    public int IdleTimeoutMs { get; set; } = 60000;
+    public int MaxFrameLength { get; set; } = 260;
+    public int SendQueueLimit { get; set; } = 64;
+    public string AllowedClientIps { get; set; } = string.Empty;
     public ModbusServerTransportMode ServerMode { get; set; } = ModbusServerTransportMode.Tcp;
     public SerialPortParameters ServerSerial { get; set; } = new();
     public List<ServerRegisterDefinition> Registers { get; set; } = new();
@@ -172,6 +253,16 @@ public sealed class MonitorConfiguration
     public string? SelectedGroupId { get; set; }
     public List<MonitorPollingGroupConfiguration> Groups { get; set; } = new();
     public Dictionary<string, string> ChannelNotes { get; set; } = new();
+}
+
+public sealed class WorkspaceConfiguration
+{
+    public const int CurrentSchemaVersion = 2;
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    public AppSettings Settings { get; set; } = new();
+    public List<DeviceProfile> Profiles { get; set; } = new();
+    public ModbusServerConfiguration ServerConfig { get; set; } = new();
+    public MonitorConfiguration MonitorConfig { get; set; } = new();
 }
 
 public sealed class MonitorPollingGroupConfiguration

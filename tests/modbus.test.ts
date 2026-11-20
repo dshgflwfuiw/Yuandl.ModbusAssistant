@@ -396,3 +396,148 @@ test('long-running concurrent Modbus TCP polling stress test (150 cycles) + UDP 
     await server.stop();
   }
 });
+
+test('ModbusTcpServerService enforces maxClients, IP allowlist, idleTimeoutMs & maxFrameLength', async () => {
+  const port = await getFreeTcpPort();
+  const server = new ModbusTcpServerService();
+  server.configureRegisters([
+    {
+      area: 'HoldingRegister',
+      address: 0,
+      dataType: 'UInt16',
+      byteOrder: 'BigEndian',
+      initialValue: '88',
+      note: 'sec',
+    },
+  ]);
+
+  // 1. Non-matching allowlist rejects loopback connection immediately
+  await server.start(port, 1, 'Tcp', undefined, {
+    bindAddress: '127.0.0.1',
+    allowedClientIps: '192.0.2.10',
+    maxClients: 2,
+    idleTimeoutMs: 5000,
+    maxFrameLength: 64,
+  });
+
+  await assert.rejects(async () => {
+    await new Promise<void>((resolve, reject) => {
+      const sock = net.connect(port, '127.0.0.1');
+      let gotDataOrStayOpen = false;
+      sock.once('close', () => {
+        if (!gotDataOrStayOpen) reject(new Error('rejected by allowlist'));
+      });
+      sock.once('error', (err) => reject(err));
+      sock.once('connect', () => {
+        // Send valid request; server should close immediately due to allowlist
+        sock.write(Buffer.from(ModbusFrame.buildRequest(1, 3, 0, 1, 'Tcp', 1)));
+      });
+      sock.once('data', () => {
+        gotDataOrStayOpen = true;
+        sock.destroy();
+        resolve();
+      });
+    });
+  });
+  await server.stop();
+
+  // 2. MaxClients=2, idleTimeoutMs=140, maxFrameLength=32 enforcement
+  const port2 = await getFreeTcpPort();
+  await server.start(port2, 1, 'Tcp', undefined, {
+    bindAddress: '127.0.0.1',
+    allowedClientIps: '127.0.0.1',
+    maxClients: 2,
+    idleTimeoutMs: 140,
+    maxFrameLength: 32,
+  });
+
+  const connectClient = () =>
+    new Promise<net.Socket>((resolve, reject) => {
+      const s = net.connect(port2, '127.0.0.1', () => resolve(s));
+      s.once('error', reject);
+    });
+
+  const c1 = await connectClient();
+  const c2 = await connectClient();
+  let c3Closed = false;
+  const c3 = net.connect(port2, '127.0.0.1');
+  c3.on('close', () => {
+    c3Closed = true;
+  });
+  c3.on('error', () => {
+    c3Closed = true;
+  });
+
+  // Verify idle timeout kicks in on c1/c2 & maxClients kicked c3
+  await new Promise((r) => setTimeout(r, 260));
+  assert.equal(c3Closed, true, '3rd client exceeding maxClients should be rejected');
+  assert.equal(c1.destroyed, true, 'Idle client should be closed after idleTimeoutMs');
+  assert.equal(c2.destroyed, true, 'Idle client 2 should be closed after idleTimeoutMs');
+
+  // 3. Oversized MBAP frame exceeding maxFrameLength=32 closes client
+  const c4 = await connectClient();
+  let c4Closed = false;
+  c4.on('close', () => {
+    c4Closed = true;
+  });
+  const oversized = Buffer.alloc(40, 0x00);
+  oversized.writeUInt16BE(1, 0);
+  oversized.writeUInt16BE(0, 2); // ProtocolId=0
+  oversized.writeUInt16BE(34, 4); // totalLength=40 > 32
+  c4.write(oversized);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(c4Closed, true, 'Oversized frame should cause server to close socket');
+
+  c1.destroy();
+  c2.destroy();
+  c3.destroy();
+  c4.destroy();
+  await server.stop();
+});
+
+test('CommunicationManager TCP Server enforces default 127.0.0.1 bind, maxClients & maxFrameLength', async () => {
+  const port = await getFreeTcpPort();
+  const modbusServer = new ModbusTcpServerService();
+  const comm = new CommunicationManager(modbusServer, () => {});
+
+  try {
+    await comm.connectTcpServer({
+      listenPort: port,
+      maxClients: 1,
+      idleTimeoutMs: 5000,
+      maxFrameLength: 32,
+      allowedClientIps: '127.0.0.1',
+    });
+
+    assert.ok(comm.getSnapshot().deviceInfo.includes('127.0.0.1:'));
+
+    const c1 = await new Promise<net.Socket>((resolve, reject) => {
+      const s = net.connect(port, '127.0.0.1', () => resolve(s));
+      s.once('error', reject);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(comm.getSnapshot().tcpServerClients.length, 1);
+
+    let c2Closed = false;
+    const c2 = net.connect(port, '127.0.0.1');
+    c2.on('close', () => {
+      c2Closed = true;
+    });
+    c2.on('error', () => {
+      c2Closed = true;
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(c2Closed, true, '2nd client should be rejected when maxClients=1');
+
+    // Oversized packet > 32B should drop c1
+    c1.write(Buffer.alloc(64, 0xaa));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(comm.getSnapshot().tcpServerClients.length, 0);
+    assert.ok(comm.getSnapshot().statistics.errorsCount >= 1);
+
+    c1.destroy();
+    c2.destroy();
+  } finally {
+    await comm.disconnect(false);
+  }
+});

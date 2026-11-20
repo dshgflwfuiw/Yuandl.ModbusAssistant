@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
 using System.Windows;
-using System.Windows.Threading;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Models;
@@ -86,11 +85,14 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
     private readonly ModbusServerService _server;
     private readonly SettingsViewModel _settings;
     private readonly PersistenceService _persistence;
-    private readonly DispatcherTimer _pollTimer;
+    private readonly object _pollSync = new();
+    private CancellationTokenSource? _pollCts;
+    private PeriodicTimer? _pollTimer;
+    private Task? _pollLoopTask;
     private readonly Dictionary<string, string> _notesByKey = new();
     private readonly Dictionary<string, bool> _enabledOverrides = new();
     private readonly Dictionary<string, List<RegisterMonitorRow>> _latestRowsByGroup = new();
-    private bool _isPollingTick;
+    private int _isPollingTick;
     private bool _isLoadingGroup;
     private bool _isInitializing;
     private const int SampleCapacity = 600;
@@ -102,18 +104,15 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
         _settings = settings;
         _persistence = persistence;
 
-        _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        _pollTimer.Tick += async (_, _) => await OnTimerTickAsync();
-
         _server.RegistersMutated += (_, _) => RunOnUi(() =>
         {
             if (DataSource == MonitorDataSource.ServerLiveListener)
                 SampleServerRegisters();
         });
 
-        SampleOnceCommand = new RelayCommand(SampleOnce);
+        SampleOnceCommand = new AsyncRelayCommand(SampleOnceAsync, ex => StatusMessage = $"采集失败: {ex.Message}");
         StartCommand = new RelayCommand(StartMonitoring);
-        StopCommand = new RelayCommand(StopMonitoring);
+        StopCommand = new RelayCommand(() => StopMonitoring("用户停止监听"));
         AddPollingGroupCommand = new RelayCommand(AddPollingGroup);
         RemovePollingGroupCommand = new RelayCommand(RemoveSelectedPollingGroup, () => SelectedPollingGroup != null);
         AddPollingDataCommand = new RelayCommand(AddPollingData, () => SelectedPollingGroup != null);
@@ -195,7 +194,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _dataSource, value))
             {
-                StopMonitoring();
+                StopMonitoring("切换数据源");
                 Samples.Clear();
                 _latestRowsByGroup.Clear();
                 Rows.Clear();
@@ -298,8 +297,11 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _intervalMs, Math.Clamp(value, 100, 10000)))
             {
                 UpdateSelectedGroup(g => g.IntervalMs = _intervalMs);
-                if (IsMonitoring && IsServerLiveMode)
-                    _pollTimer.Interval = TimeSpan.FromMilliseconds(_intervalMs);
+                lock (_pollSync)
+                {
+                    if (IsMonitoring && IsServerLiveMode && _pollTimer != null)
+                        _pollTimer.Period = TimeSpan.FromMilliseconds(_intervalMs);
+                }
             }
         }
     }
@@ -364,7 +366,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
     private string _statusMessage = "监听未启动";
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
 
-    public RelayCommand SampleOnceCommand { get; }
+    public AsyncRelayCommand SampleOnceCommand { get; }
     public RelayCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public RelayCommand AddPollingGroupCommand { get; }
@@ -599,12 +601,14 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
         ApplySampleBatch(_latestRowsByGroup.Values.SelectMany(rows => rows).ToList());
     }
 
-    public void SampleOnce()
+    public Task SampleOnceAsync()
     {
         if (DataSource == MonitorDataSource.ServerLiveListener)
+        {
             SampleServerRegisters();
-        else
-            _ = OnTimerTickAsync(forceSingle: true);
+            return Task.CompletedTask;
+        }
+        return OnTimerTickAsync(forceSingle: true, CancellationToken.None);
     }
 
     public void StartMonitoring()
@@ -621,28 +625,92 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
             return;
         }
 
+        StopMonitoring("重新启动监听");
+
         foreach (var group in PollingGroups.Where(g => g.IsEnabled && g.DataItems.Count > 0))
             group.NextPollAt = DateTime.MinValue;
-        _pollTimer.Interval = DataSource == MonitorDataSource.ServerLiveListener
+
+        var interval = DataSource == MonitorDataSource.ServerLiveListener
             ? TimeSpan.FromMilliseconds(Math.Clamp(IntervalMs, 100, 10000))
             : TimeSpan.FromMilliseconds(100);
-        _pollTimer.Start();
-        IsMonitoring = true;
+
+        CancellationTokenSource cts;
+        PeriodicTimer timer;
+        lock (_pollSync)
+        {
+            cts = new CancellationTokenSource();
+            timer = new PeriodicTimer(interval);
+            _pollCts = cts;
+            _pollTimer = timer;
+            IsMonitoring = true;
+            _pollLoopTask = Task.Run(() => RunPollLoopAsync(timer, cts.Token), CancellationToken.None);
+        }
+
         StatusMessage = DataSource == MonitorDataSource.ServerLiveListener
             ? "正在实时监听内置 Modbus 服务器内存..."
             : $"正在轮询 {PollingGroups.Count(g => g.IsEnabled)} 个采集组...";
 
+        AppLogger.Info($"寄存器监视已启动: {StatusMessage}");
+
         if (DataSource == MonitorDataSource.ServerLiveListener)
             SampleServerRegisters();
         else
-            _ = OnTimerTickAsync();
+            _ = OnTimerTickAsync(forceSingle: false, cts.Token);
     }
 
-    public void StopMonitoring()
+    public void StopMonitoring() => StopMonitoring("停止监听");
+
+    private void StopMonitoring(string reason)
     {
-        _pollTimer.Stop();
-        IsMonitoring = false;
+        CancellationTokenSource? cts;
+        PeriodicTimer? timer;
+        bool wasMonitoring = IsMonitoring;
+        lock (_pollSync)
+        {
+            cts = _pollCts;
+            _pollCts = null;
+            timer = _pollTimer;
+            _pollTimer = null;
+            _pollLoopTask = null;
+            IsMonitoring = false;
+        }
+
+        if (cts != null)
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+        }
+        timer?.Dispose();
+
         StatusMessage = "监听已停止";
+        if (wasMonitoring)
+            AppLogger.Info($"寄存器监视停止: {reason}");
+    }
+
+    private async Task RunPollLoopAsync(PeriodicTimer timer, CancellationToken token)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                if (token.IsCancellationRequested || !IsMonitoring)
+                    break;
+                await OnTimerTickAsync(forceSingle: false, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppLogger.Info("寄存器监视后台轮询任务已取消");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("寄存器监视后台轮询任务异常退出", ex);
+            RunOnUi(() =>
+            {
+                StopMonitoring($"异常退出: {ex.Message}");
+                StatusMessage = $"采集失败: {ex.Message}";
+            });
+        }
     }
 
     private void ToggleChannelById(string channelId)
@@ -668,48 +736,71 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
             ch.Label = string.IsNullOrWhiteSpace(note) ? row.Label : $"{row.Label} ({note})";
     }
 
-    private async Task OnTimerTickAsync(bool forceSingle = false)
+    private async Task OnTimerTickAsync(bool forceSingle, CancellationToken cancellationToken)
     {
-        if ((!IsMonitoring && !forceSingle) || _isPollingTick) return;
-        _isPollingTick = true;
+        if (!IsMonitoring && !forceSingle)
+            return;
+        if (Interlocked.CompareExchange(ref _isPollingTick, 1, 0) != 0)
+            return;
+
         try
         {
             if (DataSource == MonitorDataSource.ServerLiveListener)
             {
-                SampleServerRegisters();
+                RunOnUi(SampleServerRegisters);
                 return;
             }
 
             if (_comm.State != ChannelState.Connected)
             {
-                if (IsMonitoring) StopMonitoring();
-                StatusMessage = "请先在「通讯连接」建立连接后再读取或轮询";
+                RunOnUi(() =>
+                {
+                    if (IsMonitoring) StopMonitoring("通道未连接");
+                    StatusMessage = "请先在「通讯连接」建立连接后再读取或轮询";
+                });
                 return;
             }
 
             DateTime now = DateTime.Now;
-            var dueGroups = PollingGroups
-                .Where(g => g.IsEnabled && g.DataItems.Count > 0 && (forceSingle || g.NextPollAt <= now))
-                .ToList();
+            List<MonitorPollingGroup> dueGroups = new();
+            RunOnUi(() =>
+            {
+                dueGroups = PollingGroups
+                    .Where(g => g.IsEnabled && g.DataItems.Count > 0 && (forceSingle || g.NextPollAt <= now))
+                    .ToList();
+            });
+
             if (dueGroups.Count == 0)
             {
-                if (forceSingle) StatusMessage = "请先在已启用的采集组中添加数据";
+                if (forceSingle)
+                    RunOnUi(() => StatusMessage = "请先在已启用的采集组中添加数据");
                 return;
             }
 
             int successfulGroups = 0;
             foreach (var group in dueGroups)
             {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
                 try
                 {
-                    var newRows = await ReadPollingGroupAsync(group);
-                    _latestRowsByGroup[group.Id] = newRows;
-                    group.LastStatus = $"正常 · {DateTime.Now:HH:mm:ss}";
+                    var newRows = await ReadPollingGroupAsync(group, cancellationToken);
+                    RunOnUi(() =>
+                    {
+                        _latestRowsByGroup[group.Id] = newRows;
+                        group.LastStatus = $"正常 · {DateTime.Now:HH:mm:ss}";
+                    });
                     successfulGroups++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    group.LastStatus = $"失败 · {ex.Message}";
+                    AppLogger.Warn($"采集组 {group.Name} 读取失败: {ex.Message}");
+                    RunOnUi(() => group.LastStatus = $"失败 · {ex.Message}");
                 }
                 finally
                 {
@@ -718,40 +809,59 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
                 }
             }
 
-            var latestRows = _latestRowsByGroup.Values.SelectMany(rows => rows).ToList();
-            ApplySampleBatch(latestRows);
-            StatusMessage = $"采集完成：{successfulGroups}/{dueGroups.Count} 组成功，当前 {latestRows.Count} 个通道 @ {DateTime.Now:HH:mm:ss.fff}";
+            RunOnUi(() =>
+            {
+                var latestRows = _latestRowsByGroup.Values.SelectMany(rows => rows).ToList();
+                ApplySampleBatch(latestRows);
+                StatusMessage = $"采集完成：{successfulGroups}/{dueGroups.Count} 组成功，当前 {latestRows.Count} 个通道 @ {DateTime.Now:HH:mm:ss.fff}";
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // normal shutdown/cancellation
         }
         catch (Exception ex)
         {
-            StatusMessage = $"采集失败: {ex.Message}";
+            AppLogger.Error("寄存器监视采集周期异常", ex);
+            RunOnUi(() => StatusMessage = $"采集失败: {ex.Message}");
         }
         finally
         {
-            _isPollingTick = false;
+            Interlocked.Exchange(ref _isPollingTick, 0);
         }
     }
 
-    private async Task<List<RegisterMonitorRow>> ReadPollingGroupAsync(MonitorPollingGroup group)
+    private async Task<List<RegisterMonitorRow>> ReadPollingGroupAsync(MonitorPollingGroup group, CancellationToken cancellationToken)
     {
         string groupId = group.Id;
         string groupName = group.Name;
         var transport = group.Transport;
         byte unitId = group.UnitId;
-        int paletteOffset = Math.Max(0, PollingGroups.IndexOf(group)) * 3;
+        int paletteOffset = 0;
+        List<MonitorPollingData> itemsSnapshot = new();
+        RunOnUi(() =>
+        {
+            paletteOffset = Math.Max(0, PollingGroups.IndexOf(group)) * 3;
+            itemsSnapshot = group.DataItems.ToList();
+        });
+
         var rows = new List<RegisterMonitorRow>();
 
-        foreach (var item in group.DataItems.ToList())
+        for (int itemIdx = 0; itemIdx < itemsSnapshot.Count; itemIdx++)
         {
+            var item = itemsSnapshot[itemIdx];
             var req = ModbusFrame.BuildRequest(unitId, item.FunctionCode, item.StartAddress, item.Quantity, transport);
-            var resp = await _comm.ExchangeModbusAsync(req, transport, _settings.DefaultTimeoutMs, _settings.DefaultRetryTimes);
-            if (!PollingGroups.Contains(group) || !group.DataItems.Contains(item))
+            var resp = await _comm.ExchangeModbusAsync(req, transport, _settings.DefaultTimeoutMs, _settings.DefaultRetryTimes, cancellationToken);
+            bool stillExists = true;
+            RunOnUi(() => stillExists = PollingGroups.Contains(group) && group.DataItems.Contains(item));
+            if (!stillExists)
                 continue;
+
             var parsed = ModbusFrame.ParseResponse(resp, transport);
             if (parsed.IsException)
                 throw new InvalidOperationException($"{item.DisplayName}: {ModbusException.Describe(parsed.ExceptionCode ?? 0)}");
 
-            int itemColorOffset = group.DataItems.IndexOf(item) * 2;
+            int itemColorOffset = itemIdx * 2;
             if (item.FunctionCode is 1 or 2)
             {
                 var bits = ModbusFrame.ExtractBits(parsed.Payload, item.Quantity);
@@ -938,7 +1048,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
     }
 
     private static void SyncObservableCollection<T>(
-        System.Collections.ObjectModel.ObservableCollection<T> target,
+        ObservableCollection<T> target,
         IList<T> desired,
         Func<T, string> keySelector)
     {
@@ -1000,7 +1110,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
                 foreach (var r in Rows)
                     sb.AppendLine($"\"{r.ChannelId}\",\"{r.Label}\",{r.Address},\"{r.RawValue}\",{r.Value},{r.IsDigital},\"{r.Note}\"");
             }
-            File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
+            File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
             StatusMessage = $"已导出 CSV: {dlg.FileName}";
         }
     }
@@ -1014,6 +1124,6 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        StopMonitoring();
+        StopMonitoring("ViewModel 销毁");
     }
 }

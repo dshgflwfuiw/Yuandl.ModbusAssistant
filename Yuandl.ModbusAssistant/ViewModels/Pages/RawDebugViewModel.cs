@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
 using System.Windows;
-using System.Windows.Threading;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;
@@ -14,7 +13,10 @@ namespace Yuandl.ModbusAssistant.ViewModels.Pages;
 public sealed class RawDebugViewModel : ObservableObject, IDisposable
 {
     private readonly CommunicationService _comm;
-    private readonly DispatcherTimer _loopTimer;
+    private readonly object _loopSync = new();
+    private CancellationTokenSource? _loopCts;
+    private PeriodicTimer? _loopTimer;
+    private Task? _loopTask;
     private long _txPackets;
     private long _txBytes;
     private long _rxPackets;
@@ -23,8 +25,6 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
     public RawDebugViewModel(CommunicationService comm)
     {
         _comm = comm;
-        _loopTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
-        _loopTimer.Tick += async (_, _) => await SendRawAsync();
 
         _comm.ClientsChanged += (_, clients) => RunOnUi(() =>
         {
@@ -60,7 +60,7 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
             while (Messages.Count > 500) Messages.RemoveAt(Messages.Count - 1);
         });
 
-        SendCommand = new AsyncRelayCommand(SendRawAsync);
+        SendCommand = new AsyncRelayCommand(SendRawAsync, ex => ErrorText = ex.Message);
         ClearCommand = new RelayCommand(() =>
         {
             Messages.Clear();
@@ -117,14 +117,9 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isLoopSend, value))
             {
                 if (value)
-                {
-                    _loopTimer.Interval = TimeSpan.FromMilliseconds(Math.Clamp(LoopIntervalMs, 20, 60000));
-                    _loopTimer.Start();
-                }
+                    StartLoopSend();
                 else
-                {
-                    _loopTimer.Stop();
-                }
+                    StopLoopSend("用户关闭循环发送");
             }
         }
     }
@@ -136,7 +131,13 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
         set
         {
             if (SetProperty(ref _loopIntervalMs, Math.Clamp(value, 20, 60000)))
-                _loopTimer.Interval = TimeSpan.FromMilliseconds(_loopIntervalMs);
+            {
+                lock (_loopSync)
+                {
+                    if (_loopTimer != null)
+                        _loopTimer.Period = TimeSpan.FromMilliseconds(_loopIntervalMs);
+                }
+            }
         }
     }
 
@@ -163,6 +164,68 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
     public RelayCommand ClearCommand { get; }
     public RelayCommand ClearHistoryCommand { get; }
     public RelayCommand ExportLogCommand { get; }
+
+    private void StartLoopSend()
+    {
+        StopLoopSend("重启循环发送");
+        lock (_loopSync)
+        {
+            var cts = new CancellationTokenSource();
+            var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(LoopIntervalMs, 20, 60000)));
+            _loopCts = cts;
+            _loopTimer = timer;
+            _loopTask = Task.Run(() => RunLoopSendAsync(timer, cts.Token), CancellationToken.None);
+        }
+        AppLogger.Info($"RawDebug 循环发送已启动 (间隔 {LoopIntervalMs} ms)");
+    }
+
+    private void StopLoopSend(string reason)
+    {
+        CancellationTokenSource? cts;
+        PeriodicTimer? timer;
+        lock (_loopSync)
+        {
+            cts = _loopCts;
+            _loopCts = null;
+            timer = _loopTimer;
+            _loopTimer = null;
+            _loopTask = null;
+        }
+
+        if (cts != null)
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+            AppLogger.Info($"RawDebug 循环发送停止: {reason}");
+        }
+        timer?.Dispose();
+    }
+
+    private async Task RunLoopSendAsync(PeriodicTimer timer, CancellationToken token)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                if (token.IsCancellationRequested)
+                    break;
+                await SendRawAsync(token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppLogger.Info("RawDebug 循环发送后台任务已取消");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("RawDebug 循环发送后台任务异常终止", ex);
+            RunOnUi(() =>
+            {
+                ErrorText = ex.Message;
+                IsLoopSend = false;
+            });
+        }
+    }
 
     private void ExportLog()
     {
@@ -217,16 +280,24 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task SendRawAsync()
+    private Task SendRawAsync() => SendRawAsync(CancellationToken.None);
+
+    private async Task SendRawAsync(CancellationToken cancellationToken)
     {
-        ErrorText = string.Empty;
+        RunOnUi(() => ErrorText = string.Empty);
         try
         {
-            var bytes = ByteUtils.EncodeText(PayloadText, SendEncoding, Delimiter);
+            string payload = PayloadText;
+            var encoding = SendEncoding;
+            var delimiter = Delimiter;
+            var bytes = ByteUtils.EncodeText(payload, encoding, delimiter);
             if (bytes.Length == 0)
             {
-                ErrorText = "发送内容不能为空";
-                IsLoopSend = false;
+                RunOnUi(() =>
+                {
+                    ErrorText = "发送内容不能为空";
+                    IsLoopSend = false;
+                });
                 return;
             }
 
@@ -234,32 +305,43 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
                 ? SelectedClient.SessionId
                 : null;
 
-            await _comm.SendAsync(bytes, targetSession);
+            await _comm.SendAsync(bytes, targetSession, cancellationToken);
 
-            _txPackets++;
-            _txBytes += bytes.Length;
-            OnPropertyChanged(nameof(CountersText));
-
-            Messages.Insert(0, new RawMessageItem
+            RunOnUi(() =>
             {
-                Timestamp = DateTime.Now.ToString("HH:mm:ss.fff"),
-                Direction = "TX",
-                RawBytes = bytes,
-                Content = ByteUtils.DecodeBytes(bytes, SendEncoding),
-                SessionLabel = targetSession != null ? $"-> {targetSession}" : (IsTcpServerMode ? "广播全部" : null)
+                _txPackets++;
+                _txBytes += bytes.Length;
+                OnPropertyChanged(nameof(CountersText));
+
+                Messages.Insert(0, new RawMessageItem
+                {
+                    Timestamp = DateTime.Now.ToString("HH:mm:ss.fff"),
+                    Direction = "TX",
+                    RawBytes = bytes,
+                    Content = ByteUtils.DecodeBytes(bytes, encoding),
+                    SessionLabel = targetSession != null ? $"-> {targetSession}" : (IsTcpServerMode ? "广播全部" : null)
+                });
+                while (Messages.Count > 500) Messages.RemoveAt(Messages.Count - 1);
+
+                if (!SendHistory.Contains(payload))
+                {
+                    SendHistory.Insert(0, payload);
+                    while (SendHistory.Count > 30) SendHistory.RemoveAt(SendHistory.Count - 1);
+                }
             });
-            while (Messages.Count > 500) Messages.RemoveAt(Messages.Count - 1);
-
-            if (!SendHistory.Contains(PayloadText))
-            {
-                SendHistory.Insert(0, PayloadText);
-                while (SendHistory.Count > 30) SendHistory.RemoveAt(SendHistory.Count - 1);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on loop stop/cancel
         }
         catch (Exception ex)
         {
-            ErrorText = ex.Message;
-            IsLoopSend = false;
+            AppLogger.Warn($"RawDebug 发送失败: {ex.Message}");
+            RunOnUi(() =>
+            {
+                ErrorText = ex.Message;
+                IsLoopSend = false;
+            });
         }
     }
 
@@ -272,6 +354,7 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        _loopTimer.Stop();
+        StopLoopSend("ViewModel 销毁");
+        _isLoopSend = false;
     }
 }

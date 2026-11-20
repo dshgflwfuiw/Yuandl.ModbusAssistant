@@ -5,6 +5,7 @@ import type {
   ChannelStatistics,
   CommunicationStatusSnapshot,
   CommunicationType,
+  ModbusServerSecurityOptions,
   ModbusServerTransportMode,
   ModbusTransport,
   SerialPortParameters,
@@ -21,6 +22,85 @@ import { Crc16 } from '../core/utils/crc16.js';
 import { LrcUtils } from '../core/utils/lrcUtils.js';
 import { ModbusFrame } from '../protocol/modbus/modbusFrame.js';
 import { ServerRegisterCodec } from '../protocol/modbus/serverRegisterCodec.js';
+
+export function normalizeIpAddress(ip: string): string {
+  const trimmed = ip.trim();
+  if (trimmed.toLowerCase().startsWith('::ffff:')) {
+    return trimmed.slice(7);
+  }
+  return trimmed;
+}
+
+function isLoopbackIp(ip: string): boolean {
+  const norm = normalizeIpAddress(ip);
+  return norm === '::1' || norm === '127.0.0.1' || norm.startsWith('127.');
+}
+
+export function parseBindAddress(bindAddress?: string): string {
+  const raw = bindAddress?.trim() || '127.0.0.1';
+  const candidate = raw.toLowerCase() === 'localhost' ? '127.0.0.1' : raw;
+  if (net.isIP(candidate) === 0) {
+    throw new Error(`无效的绑定 IP 地址: ${bindAddress}`);
+  }
+  return candidate;
+}
+
+export function parseAllowedClientIps(raw?: string): Set<string> {
+  const result = new Set<string>();
+  if (!raw || !raw.trim()) return result;
+  const tokens = raw.split(/[,;\s]+/).filter(Boolean);
+  for (const token of tokens) {
+    const clean = token.trim();
+    if (net.isIP(clean) === 0) {
+      throw new Error(`客户端 IP 白名单格式无效: ${clean}`);
+    }
+    result.add(normalizeIpAddress(clean));
+  }
+  return result;
+}
+
+export function isClientIpAllowed(
+  remoteAddress: string | undefined,
+  allowlist: Set<string>
+): boolean {
+  if (allowlist.size === 0) return true;
+  if (!remoteAddress) return false;
+  const normalized = normalizeIpAddress(remoteAddress);
+  if (allowlist.has(normalized)) return true;
+  if (isLoopbackIp(normalized)) {
+    for (const allowed of allowlist) {
+      if (isLoopbackIp(allowed)) return true;
+    }
+  }
+  return false;
+}
+
+export function normalizeServerSecurityOptions(
+  input?: ModbusServerSecurityOptions,
+  defaultMaxFrame = 260
+): Required<ModbusServerSecurityOptions> {
+  const maxClientsRaw = Number(input?.maxClients);
+  const idleRaw = Number(input?.idleTimeoutMs);
+  const frameRaw = Number(input?.maxFrameLength);
+  const queueRaw = Number(input?.sendQueueLimit);
+
+  return {
+    bindAddress: parseBindAddress(input?.bindAddress),
+    maxClients: Number.isFinite(maxClientsRaw)
+      ? Math.min(256, Math.max(1, Math.floor(maxClientsRaw)))
+      : 32,
+    idleTimeoutMs: Number.isFinite(idleRaw)
+      ? Math.min(3600000, Math.max(0, Math.floor(idleRaw)))
+      : 60000,
+    maxFrameLength: Number.isFinite(frameRaw)
+      ? Math.min(65536, Math.max(16, Math.floor(frameRaw)))
+      : defaultMaxFrame,
+    sendQueueLimit: Number.isFinite(queueRaw)
+      ? Math.min(1024, Math.max(1, Math.floor(queueRaw)))
+      : 64,
+    allowedClientIps: input?.allowedClientIps?.trim() ?? '',
+  };
+}
 
 export class ModbusErrorCode extends Error {
   constructor(public readonly code: number) {
@@ -348,10 +428,19 @@ export class ModbusTcpServerService {
   private definitions: ServerRegisterDefinition[] = [];
   private server: net.Server | null = null;
   private sockets = new Set<net.Socket>();
+  private allowedClientIpSet = new Set<string>();
   public isRunning = false;
   public serverMode: ModbusServerTransportMode = 'Tcp';
   public port = 5020;
   public station = 1;
+  public securityOptions: Required<ModbusServerSecurityOptions> = {
+    bindAddress: '127.0.0.1',
+    maxClients: 32,
+    idleTimeoutMs: 60000,
+    maxFrameLength: 260,
+    sendQueueLimit: 64,
+    allowedClientIps: '',
+  };
   public serialParams: SerialPortParameters = {
     portName: 'COM1',
     baudRate: 9600,
@@ -514,10 +603,10 @@ export class ModbusTcpServerService {
       case 'SerialAscii':
         return `运行中：串口 ASCII ${serialSummary}，站号 ${this.station}，数据定义 ${count} 项`;
       case 'TcpAndSerial':
-        return `运行中：TCP ${this.port} + 串口 ${serialSummary}，站号 ${this.station}，数据定义 ${count} 项`;
+        return `运行中：TCP ${this.securityOptions.bindAddress}:${this.port} + 串口 ${serialSummary}，站号 ${this.station}，数据定义 ${count} 项`;
       case 'Tcp':
       default:
-        return `运行中：TCP 端口 ${this.port}，站号 ${this.station}，数据定义 ${count} 项`;
+        return `运行中：TCP ${this.securityOptions.bindAddress}:${this.port}，站号 ${this.station}，数据定义 ${count} 项`;
     }
   }
 
@@ -525,7 +614,8 @@ export class ModbusTcpServerService {
     port: number,
     station = 1,
     mode: ModbusServerTransportMode = 'Tcp',
-    serial?: SerialPortParameters
+    serial?: SerialPortParameters,
+    security?: ModbusServerSecurityOptions
   ): Promise<void> {
     if (!Number.isInteger(station) || station < 1 || station > 247) {
       throw new Error('站号必须在 1 至 247 之间');
@@ -547,6 +637,12 @@ export class ModbusTcpServerService {
       }
     }
 
+    const normalizedSecurity = normalizeServerSecurityOptions(
+      security ?? this.securityOptions,
+      260
+    );
+    const allowedSet = parseAllowedClientIps(normalizedSecurity.allowedClientIps);
+
     await this.stop();
 
     this.serverMode = mode;
@@ -557,6 +653,8 @@ export class ModbusTcpServerService {
     if (serial) {
       this.serialParams = { ...serial };
     }
+    this.securityOptions = normalizedSecurity;
+    this.allowedClientIpSet = allowedSet;
 
     if (needsTcp) {
       await new Promise<void>((resolve, reject) => {
@@ -564,7 +662,7 @@ export class ModbusTcpServerService {
         srv.once('error', (err) => {
           reject(err);
         });
-        srv.listen(port, '0.0.0.0', () => {
+        srv.listen(port, normalizedSecurity.bindAddress, () => {
           this.server = srv;
           resolve();
         });
@@ -671,11 +769,44 @@ export class ModbusTcpServerService {
   }
 
   private handleClient(socket: net.Socket): void {
+    const remoteIp = normalizeIpAddress(socket.remoteAddress || '');
+    if (!isClientIpAllowed(remoteIp, this.allowedClientIpSet)) {
+      console.warn(`[ModbusServer] 拒绝非白名单客户端 IP: ${remoteIp}`);
+      socket.destroy();
+      return;
+    }
+
+    if (this.sockets.size >= this.securityOptions.maxClients) {
+      console.warn(
+        `[ModbusServer] 客户端连接数已达上限 (${this.securityOptions.maxClients})，拒绝 ${remoteIp}`
+      );
+      socket.destroy();
+      return;
+    }
+
     this.sockets.add(socket);
     socket.setNoDelay(true);
+    if (this.securityOptions.idleTimeoutMs > 0) {
+      socket.setTimeout(this.securityOptions.idleTimeoutMs);
+      socket.on('timeout', () => {
+        console.warn(
+          `[ModbusServer] 客户端 ${remoteIp}:${socket.remotePort ?? 0} 空闲超时 (${this.securityOptions.idleTimeoutMs}ms)`
+        );
+        socket.destroy();
+      });
+    }
+
+    const maxFrameLength = Math.min(260, Math.max(16, this.securityOptions.maxFrameLength));
+    const maxOutboundBytes = this.securityOptions.sendQueueLimit * 256;
     let buffer = Buffer.alloc(0);
 
     socket.on('data', (chunk) => {
+      if (buffer.length + chunk.length > maxFrameLength * 4) {
+        console.warn(`[ModbusServer] 客户端 ${remoteIp} 接收缓冲超限，断开连接`);
+        socket.destroy();
+        return;
+      }
+
       buffer = Buffer.concat([buffer, chunk]);
       while (buffer.length >= 7) {
         const protocolId = buffer.readUInt16BE(2);
@@ -684,11 +815,14 @@ export class ModbusTcpServerService {
           return;
         }
         const length = buffer.readUInt16BE(4);
-        if (length < 2 || length > 254) {
+        const totalLength = 6 + length;
+        if (length < 2 || length > 254 || totalLength > maxFrameLength) {
+          console.warn(
+            `[ModbusServer] 客户端 ${remoteIp} 报文长度非法 (${totalLength} > ${maxFrameLength})，断开连接`
+          );
           socket.destroy();
           return;
         }
-        const totalLength = 6 + length;
         if (buffer.length < totalLength) {
           break;
         }
@@ -707,6 +841,12 @@ export class ModbusTcpServerService {
         response.writeUInt16BE(responsePdu.length + 1, 4);
         response[6] = unitId;
         Buffer.from(responsePdu).copy(response, 7);
+
+        if (socket.writableLength + response.length > maxOutboundBytes) {
+          console.warn(`[ModbusServer] 客户端 ${remoteIp} 发送积压超过上限，断开连接`);
+          socket.destroy();
+          return;
+        }
         socket.write(response);
       }
     });
@@ -930,6 +1070,14 @@ export class CommunicationManager {
   private serialRxBuffer: number[] = [];
 
   private rawTcpServer: net.Server | null = null;
+  private rawTcpServerSecurity: Required<ModbusServerSecurityOptions> = {
+    bindAddress: '127.0.0.1',
+    maxClients: 32,
+    idleTimeoutMs: 60000,
+    maxFrameLength: 4096,
+    sendQueueLimit: 64,
+    allowedClientIps: '',
+  };
   private rawTcpClients = new Map<
     string,
     { socket: net.Socket; session: TcpServerClientSession }
@@ -969,6 +1117,7 @@ export class CommunicationManager {
       serverPort: this.modbusServer.port,
       serverStation: this.modbusServer.station,
       serverSerial: { ...this.modbusServer.serialParams },
+      serverSecurity: { ...this.modbusServer.securityOptions },
       serverStatusText: this.modbusServer.statusText,
       serverRegisters: this.modbusServer.getDefinitionsWithCurrentValues(),
     };
@@ -1292,20 +1441,47 @@ export class CommunicationManager {
       throw new Error('监听端口必须在 1 至 65535 之间');
     }
 
+    const security = normalizeServerSecurityOptions(params, 4096);
+    const allowedIps = parseAllowedClientIps(security.allowedClientIps);
+
     await this.disconnect(false);
     this.manualClosing = false;
+    this.rawTcpServerSecurity = security;
     this.channelType = 'TcpServer';
-    this.channelInfo = `TCP Server (监听 :${params.listenPort})`;
+    this.channelInfo = `TCP Server (监听 ${security.bindAddress}:${params.listenPort})`;
     this.state = 'Connecting';
     this.emitState();
 
     await new Promise<void>((resolve, reject) => {
       const srv = net.createServer((socket) => {
+        const remoteAddress = normalizeIpAddress(socket.remoteAddress || '127.0.0.1');
+        if (!isClientIpAllowed(remoteAddress, allowedIps)) {
+          console.warn(`[TcpServer] 拒绝非白名单客户端: ${remoteAddress}`);
+          socket.destroy();
+          return;
+        }
+        if (this.rawTcpClients.size >= security.maxClients) {
+          console.warn(
+            `[TcpServer] 客户端数量达到上限 (${security.maxClients})，拒绝 ${remoteAddress}`
+          );
+          socket.destroy();
+          return;
+        }
+
         socket.setNoDelay(true);
         const sessionId = `S${this.nextSessionCounter++}`;
-        const remoteAddress = socket.remoteAddress || '127.0.0.1';
         const remotePort = socket.remotePort || 0;
         const sessionLabel = `${sessionId} · ${remoteAddress}:${remotePort}`;
+
+        if (security.idleTimeoutMs > 0) {
+          socket.setTimeout(security.idleTimeoutMs);
+          socket.on('timeout', () => {
+            console.warn(
+              `[TcpServer] 客户端 ${sessionLabel} 空闲超时 (${security.idleTimeoutMs}ms)`
+            );
+            socket.destroy();
+          });
+        }
 
         const session: TcpServerClientSession = {
           sessionId,
@@ -1316,10 +1492,18 @@ export class CommunicationManager {
           bytesReceived: 0,
         };
         this.rawTcpClients.set(sessionId, { socket, session });
-        this.deviceInfo = `TCP Server 监听中 (${this.rawTcpClients.size} 个客户端在线)`;
+        this.deviceInfo = `TCP Server 监听 ${security.bindAddress}:${params.listenPort} (${this.rawTcpClients.size} 个客户端在线)`;
         this.emitState();
 
         socket.on('data', (chunk) => {
+          if (chunk.length > security.maxFrameLength) {
+            console.warn(
+              `[TcpServer] 客户端 ${sessionLabel} 单包长度 ${chunk.length} 超过限制 ${security.maxFrameLength}，断开连接`
+            );
+            this.stats.errorsCount += 1;
+            socket.destroy();
+            return;
+          }
           const bytes = new Uint8Array(chunk);
           session.bytesReceived += bytes.length;
           this.emitDataReceived(bytes, sessionId, sessionLabel);
@@ -1329,7 +1513,7 @@ export class CommunicationManager {
         socket.on('close', () => {
           this.rawTcpClients.delete(sessionId);
           if (this.channelType === 'TcpServer' && this.state === 'Connected') {
-            this.deviceInfo = `TCP Server 监听中 (${this.rawTcpClients.size} 个客户端在线)`;
+            this.deviceInfo = `TCP Server 监听 ${security.bindAddress}:${params.listenPort} (${this.rawTcpClients.size} 个客户端在线)`;
             this.emitState();
           }
         });
@@ -1345,7 +1529,7 @@ export class CommunicationManager {
         reject(err);
       });
 
-      srv.listen(params.listenPort, '0.0.0.0', () => {
+      srv.listen(params.listenPort, security.bindAddress, () => {
         srv.removeAllListeners('error');
         srv.on('error', (err) => {
           if (!this.manualClosing) {
@@ -1355,7 +1539,7 @@ export class CommunicationManager {
         });
         this.rawTcpServer = srv;
         this.state = 'Connected';
-        this.deviceInfo = `TCP Server 监听端口 ${params.listenPort} (0 个客户端在线)`;
+        this.deviceInfo = `TCP Server 监听 ${security.bindAddress}:${params.listenPort} (0 个客户端在线)`;
         this.emitState();
         resolve();
       });
@@ -1446,6 +1630,12 @@ export class CommunicationManager {
       const entry = this.rawTcpClients.get(targetSessionId);
       if (!entry) {
         throw new Error(`目标客户端 ${targetSessionId} 不存在或已断开`);
+      }
+      const maxOutboundBytes = this.rawTcpServerSecurity.sendQueueLimit * 256;
+      if (entry.socket.writableLength + bytes.length > maxOutboundBytes) {
+        entry.socket.destroy();
+        this.rawTcpClients.delete(targetSessionId);
+        throw new Error(`客户端 ${targetSessionId} 发送队列积压超限，已主动断开`);
       }
       await new Promise<void>((resolve, reject) => {
         entry.socket.write(Buffer.from(bytes), (err) => {

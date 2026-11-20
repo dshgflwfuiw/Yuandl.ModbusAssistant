@@ -3,6 +3,8 @@ using System.IO.Ports;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
+using Yuandl.ModbusAssistant.Communication;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;
 using Yuandl.ModbusAssistant.Models;
@@ -23,6 +25,10 @@ public sealed class ModbusServerService : IDisposable
         public required TcpServerClientSession Info { get; init; }
         public required TcpClient Client { get; init; }
         public required NetworkStream Stream { get; init; }
+        public required CancellationTokenSource Cts { get; init; }
+        public required Channel<byte[]> OutboundQueue { get; init; }
+        public Task? ReadTask { get; set; }
+        public Task? WriteTask { get; set; }
     }
 
     private readonly ushort[] _holdingRegisters = new ushort[65536];
@@ -39,6 +45,7 @@ public sealed class ModbusServerService : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _tcpAcceptTask;
     private Task? _serialReadTask;
+    private HashSet<IPAddress> _allowedClientIps = new();
 
     public bool IsRunning { get; private set; }
     public bool IsSerialLoopbackFallback { get; private set; }
@@ -46,6 +53,7 @@ public sealed class ModbusServerService : IDisposable
     public int Port { get; private set; } = 5020;
     public int Station { get; private set; } = 1;
     public SerialPortParameters SerialParams { get; private set; } = new();
+    public ModbusServerSecurityOptions SecurityOptions { get; private set; } = new();
     public string StatusText { get; private set; } = "服务器已停止";
 
     public bool IsSerialActive => IsRunning && ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
@@ -65,8 +73,11 @@ public sealed class ModbusServerService : IDisposable
     {
         if (_tcpClients.TryRemove(sessionId, out var entry))
         {
+            entry.OutboundQueue.Writer.TryComplete();
+            try { entry.Cts.Cancel(); } catch { }
             try { entry.Stream.Dispose(); } catch { }
             try { entry.Client.Dispose(); } catch { }
+            try { entry.Cts.Dispose(); } catch { }
             NotifyClientsChanged();
         }
     }
@@ -239,7 +250,8 @@ public sealed class ModbusServerService : IDisposable
         int station = 1,
         ModbusServerTransportMode mode = ModbusServerTransportMode.Tcp,
         SerialPortParameters? serial = null,
-        bool allowLoopbackFallback = true)
+        bool allowLoopbackFallback = true,
+        ModbusServerSecurityOptions? securityOptions = null)
     {
         if (station is < 1 or > 247)
             throw new ArgumentOutOfRangeException(nameof(station), "站号必须在 1 至 247 之间");
@@ -249,6 +261,10 @@ public sealed class ModbusServerService : IDisposable
 
         if (needsTcp && port is < 1 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(port), "服务器端口必须在 1 至 65535 之间");
+
+        var normalizedSecurity = NormalizeSecurityOptions(securityOptions ?? SecurityOptions);
+        var bindIp = needsTcp ? ChannelSecurityHelper.ParseBindAddress(normalizedSecurity.BindAddress) : IPAddress.Loopback;
+        var allowedIps = ChannelSecurityHelper.ParseAllowedIps(normalizedSecurity.AllowedClientIps);
 
         var targetSerial = serial?.Clone() ?? SerialParams.Clone();
         if (needsSerial && string.IsNullOrWhiteSpace(targetSerial.PortName))
@@ -260,13 +276,15 @@ public sealed class ModbusServerService : IDisposable
         Station = station;
         if (needsTcp) Port = port;
         SerialParams = targetSerial;
+        SecurityOptions = normalizedSecurity;
+        _allowedClientIps = allowedIps;
         _cts = new CancellationTokenSource();
 
         try
         {
             if (needsTcp)
             {
-                var listener = new TcpListener(IPAddress.Any, port);
+                var listener = new TcpListener(bindIp, port);
                 listener.Start();
                 _tcpListener = listener;
                 _tcpAcceptTask = Task.Run(() => TcpAcceptLoopAsync(listener, _cts.Token), CancellationToken.None);
@@ -306,7 +324,7 @@ public sealed class ModbusServerService : IDisposable
             StatusText = BuildRunningStatusText();
             StatusChanged?.Invoke(this, StatusText);
             NotifyClientsChanged();
-            AppLogger.Info($"内置 Modbus 从站已启动: {StatusText}");
+            AppLogger.Info($"内置 Modbus 从站已启动: {StatusText} (MaxClients={SecurityOptions.MaxClients}, IdleTimeout={SecurityOptions.IdleTimeoutMs}ms, MaxFrame={SecurityOptions.MaxFrameLength}B, SendQueue={SecurityOptions.SendQueueLimit})");
         }
         catch
         {
@@ -315,13 +333,24 @@ public sealed class ModbusServerService : IDisposable
         }
     }
 
+    private static ModbusServerSecurityOptions NormalizeSecurityOptions(ModbusServerSecurityOptions source) => new()
+    {
+        BindAddress = string.IsNullOrWhiteSpace(source.BindAddress) ? "127.0.0.1" : source.BindAddress.Trim(),
+        MaxClients = Math.Clamp(source.MaxClients, 1, 256),
+        IdleTimeoutMs = Math.Clamp(source.IdleTimeoutMs, 0, 3600000),
+        MaxFrameLength = Math.Clamp(source.MaxFrameLength, 16, 4096),
+        SendQueueLimit = Math.Clamp(source.SendQueueLimit, 1, 1024),
+        AllowedClientIps = source.AllowedClientIps?.Trim() ?? string.Empty
+    };
+
     public async Task StopAsync()
     {
-        var cts = _cts;
-        _cts = null;
+        bool wasRunning = IsRunning || _tcpListener != null || _serialPort != null;
+        var cts = Interlocked.Exchange(ref _cts, null);
         if (cts != null)
         {
-            await cts.CancelAsync();
+            try { await cts.CancelAsync(); }
+            catch (Exception ex) { AppLogger.Warn($"Modbus 从站取消异常: {ex.Message}"); }
             cts.Dispose();
         }
 
@@ -329,14 +358,7 @@ public sealed class ModbusServerService : IDisposable
         _tcpListener = null;
 
         foreach (var id in _tcpClients.Keys.ToArray())
-        {
-            if (_tcpClients.TryRemove(id, out var entry))
-            {
-                try { entry.Stream.Dispose(); } catch { }
-                try { entry.Client.Dispose(); } catch { }
-            }
-        }
-        NotifyClientsChanged();
+            DisconnectTcpClient(id);
 
         if (_serialPort != null)
         {
@@ -344,19 +366,21 @@ public sealed class ModbusServerService : IDisposable
             {
                 if (_serialPort.IsOpen) _serialPort.Close();
             }
-            catch { }
+            catch (Exception ex) { AppLogger.Warn($"关闭从站物理串口异常: {ex.Message}"); }
             _serialPort.Dispose();
             _serialPort = null;
         }
 
         if (_tcpAcceptTask != null)
         {
-            try { await _tcpAcceptTask; } catch { }
+            try { await _tcpAcceptTask; }
+            catch (Exception ex) { AppLogger.Warn($"等待 Modbus 从站 TCP 监听退出异常: {ex.Message}"); }
             _tcpAcceptTask = null;
         }
         if (_serialReadTask != null)
         {
-            try { await _serialReadTask; } catch { }
+            try { await _serialReadTask; }
+            catch (Exception ex) { AppLogger.Warn($"等待 Modbus 从站串口读循环退出异常: {ex.Message}"); }
             _serialReadTask = null;
         }
 
@@ -364,6 +388,8 @@ public sealed class ModbusServerService : IDisposable
         IsSerialLoopbackFallback = false;
         StatusText = "服务器已停止";
         StatusChanged?.Invoke(this, StatusText);
+        if (wasRunning)
+            AppLogger.Info("内置 Modbus 从站已停止");
     }
 
     private string BuildRunningStatusText()
@@ -375,8 +401,8 @@ public sealed class ModbusServerService : IDisposable
         {
             ModbusServerTransportMode.SerialRtu => $"运行中：{serialModeTag} RTU {serialSummary}，站号 {Station}，数据定义 {count} 项",
             ModbusServerTransportMode.SerialAscii => $"运行中：{serialModeTag} ASCII {serialSummary}，站号 {Station}，数据定义 {count} 项",
-            ModbusServerTransportMode.TcpAndSerial => $"运行中：TCP {Port} + {serialModeTag} {serialSummary}，站号 {Station}，数据定义 {count} 项",
-            _ => $"运行中：TCP 端口 {Port}，站号 {Station}，数据定义 {count} 项"
+            ModbusServerTransportMode.TcpAndSerial => $"运行中：TCP {SecurityOptions.BindAddress}:{Port} + {serialModeTag} {serialSummary}，站号 {Station}，数据定义 {count} 项",
+            _ => $"运行中：TCP {SecurityOptions.BindAddress}:{Port}，站号 {Station}，数据定义 {count} 项"
         };
     }
 
@@ -384,6 +410,7 @@ public sealed class ModbusServerService : IDisposable
 
     private async Task TcpAcceptLoopAsync(TcpListener listener, CancellationToken token)
     {
+        string exitReason = "正常停止";
         while (!token.IsCancellationRequested)
         {
             try
@@ -391,58 +418,161 @@ public sealed class ModbusServerService : IDisposable
                 var client = await listener.AcceptTcpClientAsync(token);
                 client.NoDelay = true;
                 var endpoint = client.Client.RemoteEndPoint as IPEndPoint;
+                string remoteIpText = endpoint?.Address.ToString() ?? "unknown";
+                int remotePort = endpoint?.Port ?? 0;
+
+                if (!ChannelSecurityHelper.IsIpAllowed(endpoint?.Address, _allowedClientIps))
+                {
+                    AppLogger.Warn($"Modbus TCP 从站拒绝非白名单客户端: {remoteIpText}:{remotePort}");
+                    try { client.Dispose(); } catch { }
+                    continue;
+                }
+
+                if (_tcpClients.Count >= SecurityOptions.MaxClients)
+                {
+                    AppLogger.Warn($"Modbus TCP 从站达到最大客户端上限 ({SecurityOptions.MaxClients})，拒绝 {remoteIpText}:{remotePort}");
+                    try { client.Dispose(); } catch { }
+                    continue;
+                }
+
                 string sessionId = $"M{Interlocked.Increment(ref _nextTcpClientNumber)}";
+                var clientCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(SecurityOptions.SendQueueLimit)
+                {
+                    FullMode = BoundedChannelFullMode.Wait,
+                    SingleReader = true,
+                    SingleWriter = false
+                });
+
                 var entry = new TcpClientEntry
                 {
                     Info = new TcpServerClientSession
                     {
                         SessionId = sessionId,
-                        RemoteAddress = endpoint?.Address.ToString() ?? "unknown",
-                        RemotePort = endpoint?.Port ?? 0,
+                        RemoteAddress = remoteIpText,
+                        RemotePort = remotePort,
                         ConnectedAt = DateTime.Now
                     },
                     Client = client,
-                    Stream = client.GetStream()
+                    Stream = client.GetStream(),
+                    Cts = clientCts,
+                    OutboundQueue = queue
                 };
+
                 _tcpClients[sessionId] = entry;
+                AppLogger.Info($"Modbus TCP 从站接受客户端: {entry.Info.DisplayLabel}");
                 NotifyClientsChanged();
-                _ = Task.Run(() => HandleTcpClientAsync(entry, token), CancellationToken.None);
+                entry.WriteTask = Task.Run(() => TcpWriteLoopAsync(entry), CancellationToken.None);
+                entry.ReadTask = Task.Run(() => HandleTcpClientAsync(entry), CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
+                exitReason = "监听已取消";
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                exitReason = $"接收异常: {ex.Message}";
+                if (!token.IsCancellationRequested)
+                    AppLogger.Error("Modbus TCP 从站接收循环异常", ex);
                 break;
+            }
+        }
+        AppLogger.Info($"Modbus TCP 从站接收循环退出: {exitReason}");
+    }
+
+    private async Task TcpWriteLoopAsync(TcpClientEntry entry)
+    {
+        try
+        {
+            await foreach (var payload in entry.OutboundQueue.Reader.ReadAllAsync(entry.Cts.Token))
+            {
+                await entry.Stream.WriteAsync(payload, entry.Cts.Token);
+                await entry.Stream.FlushAsync(entry.Cts.Token);
+                entry.Info.BytesSent += payload.Length;
+                NotifyClientsChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // expected on disconnect/close
+        }
+        catch (Exception ex)
+        {
+            if (!entry.Cts.IsCancellationRequested)
+            {
+                AppLogger.Warn($"Modbus TCP 从站发送至 {entry.Info.SessionId} 失败: {ex.Message}");
+                DisconnectTcpClient(entry.Info.SessionId);
             }
         }
     }
 
-    private async Task HandleTcpClientAsync(TcpClientEntry entry, CancellationToken token)
+    private async Task HandleTcpClientAsync(TcpClientEntry entry)
     {
         var buffer = new List<byte>();
         var chunk = new byte[4096];
+        int idleMs = SecurityOptions.IdleTimeoutMs;
+        int maxFrameLength = SecurityOptions.MaxFrameLength;
+        string disconnectReason = "远端断开";
+
         try
         {
             var stream = entry.Stream;
-            while (!token.IsCancellationRequested && entry.Client.Connected)
+            while (!entry.Cts.IsCancellationRequested && entry.Client.Connected)
             {
-                int read = await stream.ReadAsync(chunk, token);
-                if (read == 0) break;
+                int read;
+                if (idleMs > 0)
+                {
+                    using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(entry.Cts.Token);
+                    idleCts.CancelAfter(idleMs);
+                    try
+                    {
+                        read = await stream.ReadAsync(chunk, idleCts.Token);
+                    }
+                    catch (OperationCanceledException) when (!entry.Cts.IsCancellationRequested)
+                    {
+                        disconnectReason = $"空闲超时 ({idleMs} ms)";
+                        AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} {disconnectReason}");
+                        break;
+                    }
+                }
+                else
+                {
+                    read = await stream.ReadAsync(chunk, entry.Cts.Token);
+                }
+
+                if (read == 0)
+                    break;
 
                 entry.Info.BytesReceived += read;
                 for (int i = 0; i < read; i++) buffer.Add(chunk[i]);
 
+                if (buffer.Count > Math.Max(maxFrameLength * 4, 8192))
+                {
+                    disconnectReason = $"接收缓冲区超过保护阈值 ({buffer.Count} B)";
+                    AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} {disconnectReason}");
+                    return;
+                }
+
                 while (buffer.Count >= 7)
                 {
                     int protocolId = (buffer[2] << 8) | buffer[3];
-                    if (protocolId != 0) return;
+                    if (protocolId != 0)
+                    {
+                        disconnectReason = $"无效协议标识 0x{protocolId:X4}";
+                        AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} {disconnectReason}");
+                        return;
+                    }
 
                     int length = (buffer[4] << 8) | buffer[5];
-                    if (length is < 2 or > 254) return;
-
                     int totalLength = 6 + length;
+                    if (length is < 2 or > 254 || totalLength > maxFrameLength)
+                    {
+                        disconnectReason = $"MBAP 帧长度越界 ({totalLength} B，上限 {maxFrameLength} B)";
+                        AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} {disconnectReason}");
+                        return;
+                    }
+
                     if (buffer.Count < totalLength) break;
 
                     var frame = buffer.GetRange(0, totalLength).ToArray();
@@ -463,16 +593,35 @@ public sealed class ModbusServerService : IDisposable
                     response[6] = unitId;
                     Array.Copy(responsePdu, 0, response, 7, responsePdu.Length);
 
-                    await stream.WriteAsync(response, token);
-                    await stream.FlushAsync(token);
-                    entry.Info.BytesSent += response.Length;
+                    if (!entry.OutboundQueue.Writer.TryWrite(response))
+                    {
+                        using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(entry.Cts.Token);
+                        waitCts.CancelAfter(250);
+                        if (!await entry.OutboundQueue.Writer.WaitToWriteAsync(waitCts.Token) ||
+                            !entry.OutboundQueue.Writer.TryWrite(response))
+                        {
+                            disconnectReason = $"发送队列拥塞 (上限 {SecurityOptions.SendQueueLimit})";
+                            AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} {disconnectReason}");
+                            return;
+                        }
+                    }
                 }
                 NotifyClientsChanged();
             }
         }
-        catch { /* ignore disconnect */ }
+        catch (OperationCanceledException)
+        {
+            disconnectReason = "服务端关闭/取消";
+        }
+        catch (Exception ex)
+        {
+            disconnectReason = $"会话异常: {ex.Message}";
+            if (!entry.Cts.IsCancellationRequested)
+                AppLogger.Warn($"Modbus TCP 从站客户端 {entry.Info.SessionId} 异常退出: {ex.Message}");
+        }
         finally
         {
+            AppLogger.Info($"Modbus TCP 从站客户端 {entry.Info.SessionId} 断开: {disconnectReason}");
             DisconnectTcpClient(entry.Info.SessionId);
         }
     }
@@ -481,6 +630,7 @@ public sealed class ModbusServerService : IDisposable
     {
         var buffer = new List<byte>();
         var temp = new byte[512];
+        string exitReason = "正常退出";
         while (!token.IsCancellationRequested && sp.IsOpen)
         {
             try
@@ -509,13 +659,16 @@ public sealed class ModbusServerService : IDisposable
             }
             catch (OperationCanceledException)
             {
+                exitReason = "任务已取消";
                 break;
             }
-            catch
+            catch (Exception ex)
             {
                 buffer.Clear();
+                AppLogger.Warn($"Modbus 从站串口读取循环异常: {ex.Message}");
             }
         }
+        AppLogger.Info($"Modbus 从站串口读循环退出: {exitReason}");
     }
 
     private bool TryTakeSerialFrame(List<byte> buffer, out byte[] frame)

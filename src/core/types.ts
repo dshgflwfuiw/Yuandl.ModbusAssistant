@@ -68,6 +68,21 @@ export interface UdpParameters {
 
 export interface TcpServerParameters {
   listenPort: number;
+  bindAddress?: string;
+  maxClients?: number;
+  idleTimeoutMs?: number;
+  maxFrameLength?: number;
+  sendQueueLimit?: number;
+  allowedClientIps?: string;
+}
+
+export interface ModbusServerSecurityOptions {
+  bindAddress?: string;
+  maxClients?: number;
+  idleTimeoutMs?: number;
+  maxFrameLength?: number;
+  sendQueueLimit?: number;
+  allowedClientIps?: string;
 }
 
 export interface TcpServerClientSession {
@@ -97,8 +112,14 @@ export type ModbusServerTransportMode =
 
 export interface ModbusServerConfiguration {
   version: number;
+  bindAddress?: string;
   port: number;
   station: number;
+  maxClients?: number;
+  idleTimeoutMs?: number;
+  maxFrameLength?: number;
+  sendQueueLimit?: number;
+  allowedClientIps?: string;
   serverMode?: ModbusServerTransportMode;
   serverSerial?: SerialPortParameters;
   registers: ServerRegisterDefinition[];
@@ -151,6 +172,7 @@ export interface CommunicationStatusSnapshot {
   serverPort: number;
   serverStation: number;
   serverSerial: SerialPortParameters;
+  serverSecurity?: Required<ModbusServerSecurityOptions>;
   serverStatusText: string;
   serverRegisters: ServerRegisterDefinition[];
 }

@@ -57,9 +57,11 @@ public sealed class ServerRegisterRowViewModel : ObservableObject
 
 public sealed class ConnectionViewModel : ObservableObject
 {
+    private const long MaxCsvImportBytes = 5 * 1024 * 1024;
     private readonly CommunicationService _comm;
     private readonly ModbusServerService _server;
     private readonly PersistenceService _persistence;
+    private List<ServerRegisterDefinition> _appliedDefinitions = new();
 
     public ConnectionViewModel(CommunicationService comm, ModbusServerService server, PersistenceService persistence)
     {
@@ -103,7 +105,7 @@ public sealed class ConnectionViewModel : ObservableObject
 
         RefreshPortsCommand = new RelayCommand(RefreshPorts);
         RefreshLocalIpAddressesCommand = new RelayCommand(RefreshLocalIpAddresses);
-        ConnectCommand = new AsyncRelayCommand(ConnectAsync);
+        ConnectCommand = new AsyncRelayCommand(ConnectAsync, ex => ConnectionError = ex.Message);
         DisconnectCommand = new AsyncRelayCommand(() => _comm.DisconnectAsync());
         KickClientCommand = new RelayCommand(p =>
         {
@@ -116,7 +118,7 @@ public sealed class ConnectionViewModel : ObservableObject
                 _server.DisconnectTcpClient(session.SessionId);
         });
 
-        StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync);
+        StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync, ex => ServerBanner = $"启动失败: {ex.Message}");
         StopServerCommand = new AsyncRelayCommand(() => _server.StopAsync());
         AddRegisterCommand = new RelayCommand(AddRegisterDefinition);
         AddRegisterBatchCommand = new RelayCommand(AddRegisterDefinitionsBatch);
@@ -125,9 +127,11 @@ public sealed class ConnectionViewModel : ObservableObject
             if (p is ServerRegisterRowViewModel row)
             {
                 ServerRegisters.Remove(row);
-                ApplyRegistersToServerAndSave();
+                MarkRegisterChangesPending("已暂存删除点位，请点击“应用点表”生效或“撤销修改”还原");
             }
         });
+        ApplyRegistersCommand = new RelayCommand(ApplyStagedRegisters);
+        RevertRegistersCommand = new RelayCommand(RevertStagedRegisters, () => HasPendingRegisterChanges);
         ApplyRuntimeValueCommand = new RelayCommand(p =>
         {
             if (p is ServerRegisterRowViewModel row)
@@ -144,7 +148,11 @@ public sealed class ConnectionViewModel : ObservableObject
         ResetRegistersCommand = new RelayCommand(() =>
         {
             _server.ResetToInitialValues();
-            ServerBanner = "已全部重置为初始值";
+            if (!HasPendingRegisterChanges)
+                ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+            else
+                SyncRuntimeValuesFromServer();
+            ServerBanner = "已全部恢复为初始值";
         });
         ExportConfigCommand = new RelayCommand(ExportServerConfig);
         ImportConfigCommand = new RelayCommand(ImportServerConfig);
@@ -153,6 +161,7 @@ public sealed class ConnectionViewModel : ObservableObject
     }
 
     public ObservableCollection<string> AvailablePorts { get; } = new();
+    public ObservableCollection<string> BindAddressChoices { get; } = new() { "127.0.0.1", "0.0.0.0" };
     public ObservableCollection<TcpServerClientSession> ServerClients { get; } = new();
     public ObservableCollection<TcpServerClientSession> ModbusServerClients { get; } = new();
     public ObservableCollection<ServerRegisterRowViewModel> ServerRegisters { get; } = new();
@@ -258,6 +267,13 @@ public sealed class ConnectionViewModel : ObservableObject
     public bool ServerUsesTcp => ServerMode is ModbusServerTransportMode.Tcp or ModbusServerTransportMode.TcpAndSerial;
     public bool ServerUsesSerial => ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
 
+    private string _serverBindAddress = "127.0.0.1";
+    public string ServerBindAddress
+    {
+        get => _serverBindAddress;
+        set => SetProperty(ref _serverBindAddress, string.IsNullOrWhiteSpace(value) ? "127.0.0.1" : value.Trim());
+    }
+
     private int _serverPort = 5020;
     public int ServerPort
     {
@@ -274,6 +290,41 @@ public sealed class ConnectionViewModel : ObservableObject
     {
         get => _serverStation;
         set => SetProperty(ref _serverStation, Math.Clamp(value, 1, 247));
+    }
+
+    private int _serverMaxClients = 32;
+    public int ServerMaxClients
+    {
+        get => _serverMaxClients;
+        set => SetProperty(ref _serverMaxClients, Math.Clamp(value, 1, 256));
+    }
+
+    private int _serverIdleTimeoutMs = 60000;
+    public int ServerIdleTimeoutMs
+    {
+        get => _serverIdleTimeoutMs;
+        set => SetProperty(ref _serverIdleTimeoutMs, Math.Clamp(value, 0, 3600000));
+    }
+
+    private int _serverMaxFrameLength = 260;
+    public int ServerMaxFrameLength
+    {
+        get => _serverMaxFrameLength;
+        set => SetProperty(ref _serverMaxFrameLength, Math.Clamp(value, 16, 4096));
+    }
+
+    private int _serverSendQueueLimit = 64;
+    public int ServerSendQueueLimit
+    {
+        get => _serverSendQueueLimit;
+        set => SetProperty(ref _serverSendQueueLimit, Math.Clamp(value, 1, 1024));
+    }
+
+    private string _serverAllowedClientIps = string.Empty;
+    public string ServerAllowedClientIps
+    {
+        get => _serverAllowedClientIps;
+        set => SetProperty(ref _serverAllowedClientIps, value ?? string.Empty);
     }
 
     public SerialPortParameters ServerSerial { get; } = new();
@@ -297,6 +348,17 @@ public sealed class ConnectionViewModel : ObservableObject
     {
         get => _serverBanner;
         set => SetProperty(ref _serverBanner, value);
+    }
+
+    private bool _hasPendingRegisterChanges;
+    public bool HasPendingRegisterChanges
+    {
+        get => _hasPendingRegisterChanges;
+        private set
+        {
+            if (SetProperty(ref _hasPendingRegisterChanges, value))
+                RevertRegistersCommand?.RaiseCanExecuteChanged();
+        }
     }
 
     private ServerRegisterArea _newArea = ServerRegisterArea.HoldingRegister;
@@ -354,6 +416,8 @@ public sealed class ConnectionViewModel : ObservableObject
     public RelayCommand AddRegisterCommand { get; }
     public RelayCommand AddRegisterBatchCommand { get; }
     public RelayCommand DeleteRegisterCommand { get; }
+    public RelayCommand ApplyRegistersCommand { get; }
+    public RelayCommand RevertRegistersCommand { get; }
     public RelayCommand ApplyRuntimeValueCommand { get; }
     public RelayCommand ToggleBitRuntimeCommand { get; }
     public RelayCommand ResetRegistersCommand { get; }
@@ -387,8 +451,12 @@ public sealed class ConnectionViewModel : ObservableObject
             else if (protocol.Contains("TCP Server", StringComparison.OrdinalIgnoreCase))
             {
                 SelectedType = CommunicationType.TcpServer;
-                if (TryParseHostAndPort(endpoint, 6000, out _, out int listenPort))
+                if (TryParseHostAndPort(endpoint, 6000, out string host, out int listenPort))
+                {
+                    if (IPAddress.TryParse(host, out _))
+                        TcpServer.BindAddress = host;
                     TcpServer.ListenPort = listenPort;
+                }
             }
             else if (protocol.Contains("UDP", StringComparison.OrdinalIgnoreCase))
             {
@@ -472,6 +540,12 @@ public sealed class ConnectionViewModel : ObservableObject
             return;
         }
 
+        foreach (string ip in rawAddresses.OrderBy(a => a, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!BindAddressChoices.Contains(ip))
+                BindAddressChoices.Add(ip);
+        }
+
         if (rawAddresses.Count > 0)
         {
             var sorted = rawAddresses.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
@@ -551,8 +625,13 @@ public sealed class ConnectionViewModel : ObservableObject
         ServerBanner = string.Empty;
         try
         {
-            ApplyRegistersToServerAndSave();
-            await _server.StartAsync(ServerPort, ServerStation, ServerMode, ServerSerial, AllowServerVirtualFallback);
+            if (HasPendingRegisterChanges)
+                ApplyRegistersToServerAndSave();
+            else
+                SaveServerConfig();
+
+            var security = BuildModbusServerSecurityOptions();
+            await _server.StartAsync(ServerPort, ServerStation, ServerMode, ServerSerial, AllowServerVirtualFallback, security);
             SaveServerConfig();
         }
         catch (Exception ex)
@@ -560,6 +639,16 @@ public sealed class ConnectionViewModel : ObservableObject
             ServerBanner = $"启动失败: {ex.Message}";
         }
     }
+
+    private ModbusServerSecurityOptions BuildModbusServerSecurityOptions() => new()
+    {
+        BindAddress = ServerBindAddress,
+        MaxClients = ServerMaxClients,
+        IdleTimeoutMs = ServerIdleTimeoutMs,
+        MaxFrameLength = ServerMaxFrameLength,
+        SendQueueLimit = ServerSendQueueLimit,
+        AllowedClientIps = ServerAllowedClientIps
+    };
 
     private void AddRegisterDefinition()
     {
@@ -584,12 +673,10 @@ public sealed class ConnectionViewModel : ObservableObject
             else all.Add(candidate);
 
             ServerRegisterCodec.ValidateNoOverlap(all);
-            _server.ConfigureRegisters(all);
-            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
-            SaveServerConfig();
+            ReloadRegisterRows(all);
             NewAddress += ServerRegisterCodec.GetWidth(candidate.DataType);
             NewNote = string.Empty;
-            ServerBanner = "已添加并同步到服务器内存";
+            MarkRegisterChangesPending("已暂存 1 条点位定义，点击“应用点表”生效或“撤销修改”还原");
         }
         catch (Exception ex)
         {
@@ -625,12 +712,10 @@ public sealed class ConnectionViewModel : ObservableObject
             }
 
             ServerRegisterCodec.ValidateNoOverlap(all);
-            _server.ConfigureRegisters(all);
-            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
-            SaveServerConfig();
+            ReloadRegisterRows(all);
             NewAddress = address;
             NewNote = string.Empty;
-            ServerBanner = $"已批量添加 {NewRegisterCount} 条数据定义并同步到服务器内存";
+            MarkRegisterChangesPending($"已暂存批量添加 {NewRegisterCount} 条定义，点击“应用点表”生效");
         }
         catch (Exception ex)
         {
@@ -643,6 +728,12 @@ public sealed class ConnectionViewModel : ObservableObject
         ServerBanner = string.Empty;
         try
         {
+            if (!_appliedDefinitions.Any(d => d.Area == row.Area && d.Address == row.Address))
+            {
+                ServerBanner = "该点位尚未应用到运行实例，请先点击“应用点表”";
+                return;
+            }
+
             _server.SetRuntimeValue(row.Area, row.Address, row.CurrentValue);
             ServerBanner = $"已在线更新 {row.Area} @ {row.Address} = {row.CurrentValue}";
         }
@@ -653,50 +744,122 @@ public sealed class ConnectionViewModel : ObservableObject
         }
     }
 
+    private void ApplyStagedRegisters()
+    {
+        ServerBanner = string.Empty;
+        try
+        {
+            ApplyRegistersToServerAndSave();
+            ServerBanner = $"已应用并保存 {ServerRegisters.Count} 条点表定义";
+        }
+        catch (Exception ex)
+        {
+            ServerBanner = $"应用点表失败: {ex.Message}";
+        }
+    }
+
+    private void RevertStagedRegisters()
+    {
+        var liveDefs = _server.GetDefinitionsWithCurrentValues();
+        var fallback = liveDefs.Count > 0 || _appliedDefinitions.Count == 0
+            ? liveDefs
+            : _appliedDefinitions;
+        ReloadRegisterRows(fallback);
+        HasPendingRegisterChanges = false;
+        ServerBanner = "已撤销未应用的点表修改";
+    }
+
+    private void MarkRegisterChangesPending(string message)
+    {
+        HasPendingRegisterChanges = true;
+        ServerBanner = message;
+    }
+
     private void ApplyRegistersToServerAndSave()
     {
         var list = ServerRegisters.Select(r => r.ToModel()).ToList();
         _server.ConfigureRegisters(list);
-        ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+        _appliedDefinitions = _server.GetDefinitionsWithCurrentValues();
+        ReloadRegisterRows(_appliedDefinitions);
+        HasPendingRegisterChanges = false;
         SaveServerConfig();
     }
 
     private void LoadSavedServerConfig()
     {
         var cfg = _persistence.LoadServerConfig();
+        ApplyLoadedConfigToProperties(cfg);
+
+        try
+        {
+            _server.ConfigureRegisters(cfg.Registers);
+            _appliedDefinitions = _server.GetDefinitionsWithCurrentValues();
+            ReloadRegisterRows(_appliedDefinitions);
+            HasPendingRegisterChanges = false;
+        }
+        catch
+        {
+            _appliedDefinitions = CloneDefinitions(cfg.Registers);
+            ReloadRegisterRows(cfg.Registers);
+        }
+        RefreshLocalIpAddresses();
+    }
+
+    private void ApplyLoadedConfigToProperties(ModbusServerConfiguration cfg)
+    {
+        ServerBindAddress = string.IsNullOrWhiteSpace(cfg.BindAddress) ? "127.0.0.1" : cfg.BindAddress;
+        if (!BindAddressChoices.Contains(ServerBindAddress))
+            BindAddressChoices.Add(ServerBindAddress);
+
         ServerPort = cfg.Port;
         ServerStation = cfg.Station;
+        ServerMaxClients = cfg.MaxClients > 0 ? cfg.MaxClients : 32;
+        ServerIdleTimeoutMs = cfg.IdleTimeoutMs >= 0 ? cfg.IdleTimeoutMs : 60000;
+        ServerMaxFrameLength = cfg.MaxFrameLength >= 16 ? cfg.MaxFrameLength : 260;
+        ServerSendQueueLimit = cfg.SendQueueLimit > 0 ? cfg.SendQueueLimit : 64;
+        ServerAllowedClientIps = cfg.AllowedClientIps ?? string.Empty;
         ServerMode = cfg.ServerMode;
         ServerSerial.PortName = cfg.ServerSerial.PortName;
         ServerSerial.BaudRate = cfg.ServerSerial.BaudRate;
         ServerSerial.DataBits = cfg.ServerSerial.DataBits;
         ServerSerial.Parity = cfg.ServerSerial.Parity;
         ServerSerial.StopBits = cfg.ServerSerial.StopBits;
-
-        try
-        {
-            _server.ConfigureRegisters(cfg.Registers);
-            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
-        }
-        catch
-        {
-            ReloadRegisterRows(cfg.Registers);
-        }
-        RefreshLocalIpAddresses();
     }
+
+    private ModbusServerConfiguration BuildPersistedServerConfig(bool useAppliedRegisters) => new()
+    {
+        Version = WorkspaceConfiguration.CurrentSchemaVersion,
+        BindAddress = ServerBindAddress,
+        Port = ServerPort,
+        Station = ServerStation,
+        MaxClients = ServerMaxClients,
+        IdleTimeoutMs = ServerIdleTimeoutMs,
+        MaxFrameLength = ServerMaxFrameLength,
+        SendQueueLimit = ServerSendQueueLimit,
+        AllowedClientIps = ServerAllowedClientIps,
+        ServerMode = ServerMode,
+        ServerSerial = ServerSerial.Clone(),
+        Registers = useAppliedRegisters
+            ? CloneDefinitions(_appliedDefinitions)
+            : ServerRegisters.Select(r => r.ToModel()).ToList()
+    };
 
     private void SaveServerConfig()
     {
-        var cfg = new ModbusServerConfiguration
-        {
-            Port = ServerPort,
-            Station = ServerStation,
-            ServerMode = ServerMode,
-            ServerSerial = ServerSerial.Clone(),
-            Registers = ServerRegisters.Select(r => r.ToModel()).ToList()
-        };
-        _persistence.SaveServerConfig(cfg);
+        _persistence.SaveServerConfig(BuildPersistedServerConfig(useAppliedRegisters: true));
     }
+
+    private static List<ServerRegisterDefinition> CloneDefinitions(IEnumerable<ServerRegisterDefinition> source) =>
+        source.Select(d => new ServerRegisterDefinition
+        {
+            Area = d.Area,
+            Address = d.Address,
+            DataType = d.DataType,
+            ByteOrder = d.ByteOrder,
+            InitialValue = d.InitialValue,
+            Note = d.Note,
+            CurrentValue = d.CurrentValue
+        }).ToList();
 
     private void ReloadRegisterRows(IEnumerable<ServerRegisterDefinition> defs)
     {
@@ -737,15 +900,8 @@ public sealed class ConnectionViewModel : ObservableObject
         };
         if (dlg.ShowDialog() == true)
         {
-            var cfg = new ModbusServerConfiguration
-            {
-                Port = ServerPort,
-                Station = ServerStation,
-                ServerMode = ServerMode,
-                ServerSerial = ServerSerial.Clone(),
-                Registers = ServerRegisters.Select(r => r.ToModel()).ToList()
-            };
-            File.WriteAllText(dlg.FileName, PersistenceService.SerializeServerConfig(cfg), Encoding.UTF8);
+            var cfg = BuildPersistedServerConfig(useAppliedRegisters: false);
+            File.WriteAllText(dlg.FileName, PersistenceService.SerializeServerConfig(cfg), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
             ServerBanner = $"已导出配置: {dlg.FileName}";
         }
     }
@@ -760,21 +916,21 @@ public sealed class ConnectionViewModel : ObservableObject
         {
             try
             {
-                var cfg = PersistenceService.DeserializeServerConfig(File.ReadAllText(dlg.FileName, Encoding.UTF8))
-                    ?? throw new InvalidDataException("配置文件格式无效");
-                ServerPort = cfg.Port;
-                ServerStation = cfg.Station;
-                ServerMode = cfg.ServerMode;
-                ServerSerial.PortName = cfg.ServerSerial.PortName;
-                ServerSerial.BaudRate = cfg.ServerSerial.BaudRate;
-                ServerSerial.DataBits = cfg.ServerSerial.DataBits;
-                ServerSerial.Parity = cfg.ServerSerial.Parity;
-                ServerSerial.StopBits = cfg.ServerSerial.StopBits;
+                var info = new FileInfo(dlg.FileName);
+                if (info.Length > MaxCsvImportBytes)
+                    throw new InvalidDataException("配置文件大小超过 5 MB 限制");
 
-                _server.ConfigureRegisters(cfg.Registers);
-                ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
-                SaveServerConfig();
-                ServerBanner = $"已导入配置 ({cfg.Registers.Count} 项)";
+                string content = ReadUtf8File(dlg.FileName);
+                var cfg = PersistenceService.DeserializeServerConfig(content)
+                    ?? throw new InvalidDataException("配置文件格式无效");
+
+                foreach (var def in cfg.Registers)
+                    ServerRegisterCodec.Validate(def);
+                ServerRegisterCodec.ValidateNoOverlap(cfg.Registers);
+
+                ApplyLoadedConfigToProperties(cfg);
+                ReloadRegisterRows(cfg.Registers);
+                MarkRegisterChangesPending($"已载入 JSON 配置 ({cfg.Registers.Count} 项)，点击“应用点表”生效或“撤销修改”还原");
             }
             catch (Exception ex)
             {
@@ -819,56 +975,79 @@ public sealed class ConnectionViewModel : ObservableObject
 
         try
         {
-            var lines = File.ReadAllLines(dlg.FileName, Encoding.UTF8)
-                .Where(l => !string.IsNullOrWhiteSpace(l))
-                .ToList();
-            if (lines.Count == 0)
-                throw new InvalidDataException("CSV 文件为空");
+            var fileInfo = new FileInfo(dlg.FileName);
+            if (!fileInfo.Exists)
+                throw new FileNotFoundException("CSV 文件不存在", dlg.FileName);
+            if (fileInfo.Length > MaxCsvImportBytes)
+                throw new InvalidDataException($"CSV 文件过大 ({fileInfo.Length / 1024.0 / 1024.0:0.##} MB)，限制 5 MB 以内");
 
-            var imported = new List<ServerRegisterDefinition>();
-            int startIndex = lines[0].StartsWith("Area,", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
-            for (int i = startIndex; i < lines.Count; i++)
-            {
-                var cols = ParseCsvLine(lines[i]);
-                if (cols.Count < 5)
-                    throw new FormatException($"第 {i + 1} 行列数不足（至少需要 Area,Address,DataType,ByteOrder,InitialValue）");
-
-                if (!Enum.TryParse<ServerRegisterArea>(cols[0], ignoreCase: true, out var area))
-                    throw new FormatException($"第 {i + 1} 行存储区无效: {cols[0]}");
-                if (!int.TryParse(cols[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int address))
-                    throw new FormatException($"第 {i + 1} 行地址无效: {cols[1]}");
-                if (!Enum.TryParse<ServerRegisterDataType>(cols[2], ignoreCase: true, out var dataType))
-                    throw new FormatException($"第 {i + 1} 行数据类型无效: {cols[2]}");
-                if (!Enum.TryParse<ServerRegisterByteOrder>(cols[3], ignoreCase: true, out var byteOrder))
-                    throw new FormatException($"第 {i + 1} 行字节序无效: {cols[3]}");
-
-                string initial = cols[4];
-                string note = cols.Count >= 7 ? cols[6] : (cols.Count == 6 ? cols[5] : string.Empty);
-
-                var def = new ServerRegisterDefinition
-                {
-                    Area = area,
-                    Address = address,
-                    DataType = dataType,
-                    ByteOrder = byteOrder,
-                    InitialValue = initial,
-                    CurrentValue = initial,
-                    Note = note
-                };
-                ServerRegisterCodec.Validate(def);
-                imported.Add(def);
-            }
-
-            ServerRegisterCodec.ValidateNoOverlap(imported);
-            _server.ConfigureRegisters(imported);
-            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
-            SaveServerConfig();
-            ServerBanner = $"已从 CSV 导入 {imported.Count} 项点表定义";
+            string rawText = ReadUtf8File(dlg.FileName);
+            var imported = ParseRegisterDefinitionsFromCsv(rawText);
+            ReloadRegisterRows(imported);
+            MarkRegisterChangesPending($"已从 CSV 载入 {imported.Count} 项待应用点位，请点击“应用点表”生效或“撤销修改”还原");
         }
         catch (Exception ex)
         {
             ServerBanner = $"CSV 导入失败: {ex.Message}";
         }
+    }
+
+    public static List<ServerRegisterDefinition> ParseRegisterDefinitionsFromCsv(string csvText)
+    {
+        var records = ParseCsvRecords(csvText)
+            .Where(cols => cols.Any(c => !string.IsNullOrWhiteSpace(c)))
+            .ToList();
+        if (records.Count == 0)
+            throw new InvalidDataException("CSV 文件为空");
+
+        var imported = new List<ServerRegisterDefinition>();
+        int startIndex = records[0].Count > 0 && records[0][0].Equals("Area", StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : 0;
+
+        for (int i = startIndex; i < records.Count; i++)
+        {
+            var cols = records[i];
+            if (cols.Count < 5)
+                throw new FormatException($"第 {i + 1} 条记录列数不足（至少需要 Area,Address,DataType,ByteOrder,InitialValue）");
+
+            if (!Enum.TryParse<ServerRegisterArea>(cols[0], ignoreCase: true, out var area))
+                throw new FormatException($"第 {i + 1} 条记录存储区无效: {cols[0]}");
+            if (!int.TryParse(cols[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int address))
+                throw new FormatException($"第 {i + 1} 条记录地址无效: {cols[1]}");
+            if (!Enum.TryParse<ServerRegisterDataType>(cols[2], ignoreCase: true, out var dataType))
+                throw new FormatException($"第 {i + 1} 条记录数据类型无效: {cols[2]}");
+            if (!Enum.TryParse<ServerRegisterByteOrder>(cols[3], ignoreCase: true, out var byteOrder))
+                throw new FormatException($"第 {i + 1} 条记录字节序无效: {cols[3]}");
+
+            string initial = cols[4];
+            string note = cols.Count >= 7 ? cols[6] : (cols.Count == 6 ? cols[5] : string.Empty);
+
+            var def = new ServerRegisterDefinition
+            {
+                Area = area,
+                Address = address,
+                DataType = dataType,
+                ByteOrder = byteOrder,
+                InitialValue = initial,
+                CurrentValue = initial,
+                Note = note
+            };
+            ServerRegisterCodec.Validate(def);
+            imported.Add(def);
+        }
+
+        if (imported.Count == 0)
+            throw new InvalidDataException("CSV 文件中不包含有效点表记录");
+
+        ServerRegisterCodec.ValidateNoOverlap(imported);
+        return imported;
+    }
+
+    private static string ReadUtf8File(string path)
+    {
+        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     private static string EscapeCsv(string? value)
@@ -879,20 +1058,25 @@ public sealed class ConnectionViewModel : ObservableObject
         return s;
     }
 
-    private static List<string> ParseCsvLine(string line)
+    public static List<List<string>> ParseCsvRecords(string csvText)
     {
-        var result = new List<string>();
-        var current = new StringBuilder();
+        var records = new List<List<string>>();
+        if (string.IsNullOrEmpty(csvText))
+            return records;
+
+        string normalized = csvText.TrimStart('\uFEFF');
+        var currentRow = new List<string>();
+        var currentField = new StringBuilder();
         bool inQuotes = false;
 
-        for (int i = 0; i < line.Length; i++)
+        for (int i = 0; i < normalized.Length; i++)
         {
-            char c = line[i];
+            char c = normalized[i];
             if (inQuotes)
             {
-                if (c == '"' && i + 1 < line.Length && line[i + 1] == '"')
+                if (c == '"' && i + 1 < normalized.Length && normalized[i + 1] == '"')
                 {
-                    current.Append('"');
+                    currentField.Append('"');
                     i++;
                 }
                 else if (c == '"')
@@ -901,7 +1085,7 @@ public sealed class ConnectionViewModel : ObservableObject
                 }
                 else
                 {
-                    current.Append(c);
+                    currentField.Append(c);
                 }
             }
             else if (c == '"')
@@ -910,16 +1094,35 @@ public sealed class ConnectionViewModel : ObservableObject
             }
             else if (c == ',')
             {
-                result.Add(current.ToString().Trim());
-                current.Clear();
+                currentRow.Add(currentField.ToString().Trim());
+                currentField.Clear();
+            }
+            else if (c == '\r' || c == '\n')
+            {
+                if (c == '\r' && i + 1 < normalized.Length && normalized[i + 1] == '\n')
+                    i++;
+
+                currentRow.Add(currentField.ToString().Trim());
+                currentField.Clear();
+                records.Add(currentRow);
+                currentRow = new List<string>();
             }
             else
             {
-                current.Append(c);
+                currentField.Append(c);
             }
         }
-        result.Add(current.ToString().Trim());
-        return result;
+
+        if (inQuotes)
+            throw new FormatException("CSV 引号未正确闭合");
+
+        if (currentField.Length > 0 || currentRow.Count > 0)
+        {
+            currentRow.Add(currentField.ToString().Trim());
+            records.Add(currentRow);
+        }
+
+        return records;
     }
 
     private void NotifyVisibilityProperties()

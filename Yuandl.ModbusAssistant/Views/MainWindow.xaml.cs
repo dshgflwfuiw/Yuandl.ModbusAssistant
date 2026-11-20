@@ -4,10 +4,12 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
 using Yuandl.ModbusAssistant.ViewModels;
+using Yuandl.ThemeUI.Appearance;
+using Yuandl.ThemeUI.Controls;
 
 namespace Yuandl.ModbusAssistant.Views;
 
-public partial class MainWindow : Window, INotifyPropertyChanged
+public partial class MainWindow : FluentWindow, INotifyPropertyChanged
 {
     private bool _isNavigationExpanded = true;
     private MainViewModel? _boundVm;
@@ -15,6 +17,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public MainWindow()
     {
         InitializeComponent();
+        ApplicationThemeManager.Apply(this);
         ToggleNavigationCommand = new RelayCommand(ToggleNavigation);
         DataContextChanged += OnDataContextChanged;
     }

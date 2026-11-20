@@ -1,6 +1,7 @@
-<Window x:Class="Yuandl.ModbusAssistant.Views.MainWindow"
+<ui:FluentWindow x:Class="Yuandl.ModbusAssistant.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.yuandl.cn/xamltheme/2024/xaml"
         xmlns:controls="clr-namespace:Yuandl.ModbusAssistant.Controls"
         Title="Yuandl.ModbusAssistant — 工业协议与 Modbus 调试工作站 (.NET 8 WPF)"
         Width="1280"
@@ -16,12 +17,15 @@
         Foreground="{DynamicResource TextPrimaryBrush}">
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" MinHeight="28" />
         </Grid.RowDefinitions>
 
+        <ui:TitleBar Grid.Row="0" Title="Yuandl.ModbusAssistant — 工业协议与 Modbus 调试工作站" />
+
         <!-- Main Workspace with Left Navigation Rail -->
-        <TabControl Grid.Row="0"
+        <TabControl Grid.Row="1"
                     SelectedIndex="{Binding SelectedTabIndex}"
                     TabStripPlacement="Left"
                     Background="{DynamicResource BgCanvasBrush}"
@@ -240,12 +244,36 @@
                                 <!-- TCP Server Parameters + Connected Clients -->
                                 <StackPanel Visibility="{Binding IsTcpServerSelected, Converter={StaticResource BoolToVis}}">
                                     <WrapPanel Margin="0,0,0,8">
-                                        <StackPanel Width="150" Margin="0,0,12,8">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="本地监听端口" />
+                                        <StackPanel Width="145" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="绑定 IP (默认本机回环)" />
+                                            <ComboBox ItemsSource="{Binding BindAddressChoices}" Text="{Binding TcpServer.BindAddress, UpdateSourceTrigger=PropertyChanged}" IsEditable="True" IsTextSearchEnabled="False" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="100" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="监听端口" />
                                             <TextBox Text="{Binding TcpServer.ListenPort}" Padding="6,4" />
                                         </StackPanel>
-                                        <StackPanel Width="360" Margin="0,0,12,8">
-                                            <TextBlock Style="{StaticResource FieldLabel}" Text="本机 IP:端口" />
+                                        <StackPanel Width="85" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="最大客户端" />
+                                            <TextBox Text="{Binding TcpServer.MaxClients}" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="105" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="空闲超时 (ms)" />
+                                            <TextBox Text="{Binding TcpServer.IdleTimeoutMs}" Padding="6,4" ToolTip="0 表示不启用空闲断开" />
+                                        </StackPanel>
+                                        <StackPanel Width="105" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="单包上限 (B)" />
+                                            <TextBox Text="{Binding TcpServer.MaxFrameLength}" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="85" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="发送队列" />
+                                            <TextBox Text="{Binding TcpServer.SendQueueLimit}" Padding="6,4" />
+                                        </StackPanel>
+                                        <StackPanel Width="180" Margin="0,0,10,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="IP 白名单 (留空=不限制)" />
+                                            <TextBox Text="{Binding TcpServer.AllowedClientIps, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" ToolTip="支持逗号分隔多个 IPv4，如 127.0.0.1, 192.168.1.50" />
+                                        </StackPanel>
+                                        <StackPanel Width="320" Margin="0,0,12,8">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="本机参考网卡 IP:端口" />
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right" Content="刷新" Command="{Binding RefreshLocalIpAddressesCommand}" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="6,0,0,0" />
                                                 <TextBlock Text="{Binding LocalIpAddressesText}" VerticalAlignment="Center" FontFamily="Consolas" TextTrimming="CharacterEllipsis" ToolTip="{Binding LocalIpAddressesText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
@@ -285,13 +313,18 @@
                             <StackPanel>
                                 <DockPanel Margin="0,0,0,10">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Style="{StaticResource PrimaryButton}" Content="应用点表" Command="{Binding ApplyRegistersCommand}" Margin="0,0,6,0" ToolTip="将暂存的点表定义同步至 Modbus 从站并持久化保存" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="撤销修改" Command="{Binding RevertRegistersCommand}" Margin="0,0,6,0" ToolTip="放弃尚未应用的点表增删或导入" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导入 CSV" Command="{Binding ImportCsvCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导出 CSV" Command="{Binding ExportCsvCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导入 JSON" Command="{Binding ImportConfigCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导出 JSON" Command="{Binding ExportConfigCommand}" Margin="0,0,6,0" />
-                                        <Button Style="{StaticResource SecondaryButton}" Content="重置初始值" Command="{Binding ResetRegistersCommand}" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="恢复初始值" Command="{Binding ResetRegistersCommand}" />
                                     </StackPanel>
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="内置 Modbus 从站服务器 (TCP / 串口 RTU / 串口 ASCII / 双通道 + 在线改值)" Margin="0" VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SectionTitle}" Text="内置 Modbus 从站服务器 (TCP / 串口 RTU / 串口 ASCII / 双通道 + 在线改值)" Margin="0" VerticalAlignment="Center" />
+                                        <TextBlock Text=" [有未应用变更]" Foreground="{DynamicResource WarningBrush}" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="{Binding HasPendingRegisterChanges, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
                                 </DockPanel>
 
                                 <WrapPanel Margin="0,0,0,10">
@@ -303,9 +336,33 @@
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="从站站号" />
                                         <TextBox Text="{Binding ServerStation}" Padding="6,4" />
                                     </StackPanel>
-                                    <StackPanel Width="95" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Width="140" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="绑定 IP" />
+                                        <ComboBox ItemsSource="{Binding BindAddressChoices}" Text="{Binding ServerBindAddress, UpdateSourceTrigger=PropertyChanged}" IsEditable="True" IsTextSearchEnabled="False" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="85" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="TCP 端口" />
                                         <TextBox Text="{Binding ServerPort}" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="80" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="最大客户端" />
+                                        <TextBox Text="{Binding ServerMaxClients}" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="100" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="空闲超时(ms)" />
+                                        <TextBox Text="{Binding ServerIdleTimeoutMs}" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="90" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="单包上限(B)" />
+                                        <TextBox Text="{Binding ServerMaxFrameLength}" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="80" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="发送队列" />
+                                        <TextBox Text="{Binding ServerSendQueueLimit}" Padding="6,4" />
+                                    </StackPanel>
+                                    <StackPanel Width="160" Margin="0,0,10,8" Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="IP 白名单(逗号分隔)" />
+                                        <TextBox Text="{Binding ServerAllowedClientIps, UpdateSourceTrigger=PropertyChanged}" Padding="6,4" />
                                     </StackPanel>
                                     <WrapPanel Visibility="{Binding ServerUsesSerial, Converter={StaticResource BoolToVis}}">
                                         <StackPanel Width="115" Margin="0,0,8,8">
@@ -994,7 +1051,16 @@
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="0">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource SectionTitle}" Text="设备连接配置集 (本地持久化)" />
+                            <DockPanel Margin="0,0,0,8">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Style="{StaticResource PrimaryButton}" Content="保存变更" Command="{Binding SaveProfilesCommand}" Margin="0,0,6,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="撤销修改" Command="{Binding RevertProfilesCommand}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="设备连接配置集 (本地持久化)" Margin="0" VerticalAlignment="Center" />
+                                    <TextBlock Text=" [有未保存修改]" Foreground="{DynamicResource WarningBrush}" FontWeight="Bold" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                            </DockPanel>
                             <WrapPanel>
                                 <StackPanel Width="180" Margin="0,0,10,6">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="设备名称" />
@@ -1012,7 +1078,7 @@
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="默认站号" />
                                     <TextBox Text="{Binding StationId}" Padding="6,4" />
                                 </StackPanel>
-                                <Button Style="{StaticResource PrimaryButton}" Content="+ 保存设备方案" Command="{Binding AddProfileCommand}" VerticalAlignment="Bottom" Margin="0,0,0,6" />
+                                <Button Style="{StaticResource PrimaryButton}" Content="+ 暂存设备方案" Command="{Binding AddProfileCommand}" VerticalAlignment="Bottom" Margin="0,0,0,6" />
                             </WrapPanel>
                             <TextBlock Text="{Binding StatusBanner}" Foreground="{DynamicResource AccentBrush}" Margin="0,6,0,0" />
                         </StackPanel>
@@ -1161,7 +1227,7 @@
         </TabControl>
 
         <!-- Bottom Industrial Telemetry Status Bar -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Background="{DynamicResource StatusBarBrush}"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,1,0,0"
@@ -1180,4 +1246,4 @@
             </Grid>
         </Border>
     </Grid>
-</Window>
+</ui:FluentWindow>

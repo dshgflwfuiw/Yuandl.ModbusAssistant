@@ -82,7 +82,12 @@ const DEFAULT_COMM_FORM = {
   udpRemoteHost: '127.0.0.1',
   udpRemotePort: 502,
   udpLocalPort: 0,
+  tcpServerBindAddress: '127.0.0.1',
   tcpServerPort: 6000,
+  tcpServerMaxClients: 32,
+  tcpServerIdleTimeoutMs: 60000,
+  tcpServerMaxFrameLength: 4096,
+  tcpServerAllowedClientIps: '',
 };
 
 function readStorage<T>(key: string): T | null {
@@ -168,6 +173,14 @@ const DEFAULT_STATUS: CommunicationStatusSnapshot = {
     stopBits: 'One',
     dtrEnable: true,
     rtsEnable: true,
+  },
+  serverSecurity: {
+    bindAddress: '127.0.0.1',
+    maxClients: 32,
+    idleTimeoutMs: 60000,
+    maxFrameLength: 260,
+    sendQueueLimit: 64,
+    allowedClientIps: '',
   },
   serverStatusText: '服务器已停止',
   serverRegisters: [],

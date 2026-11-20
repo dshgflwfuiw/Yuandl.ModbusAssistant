@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Yuandl.ModbusAssistant.Services;
 
 namespace Yuandl.ModbusAssistant.ViewModels;
 
@@ -50,24 +51,26 @@ public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<object?, Task> _execute;
     private readonly Predicate<object?>? _canExecute;
+    private readonly Action<Exception>? _onError;
     private bool _isExecuting;
 
-    public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null)
-        : this(_ => execute(), canExecute is null ? null : _ => canExecute())
+    public AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null, Action<Exception>? onError = null)
+        : this(_ => execute(), canExecute is null ? null : _ => canExecute(), onError)
     {
     }
 
-    public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null)
+    public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null, Action<Exception>? onError = null)
     {
         _execute = execute;
         _canExecute = canExecute;
+        _onError = onError;
     }
 
     public event EventHandler? CanExecuteChanged;
 
     public bool CanExecute(object? parameter) => !_isExecuting && (_canExecute?.Invoke(parameter) ?? true);
 
-    public async void Execute(object? parameter)
+    public async Task ExecuteAsync(object? parameter = null)
     {
         if (!CanExecute(parameter)) return;
         _isExecuting = true;
@@ -76,11 +79,25 @@ public sealed class AsyncRelayCommand : ICommand
         {
             await _execute(parameter);
         }
+        catch (OperationCanceledException ex)
+        {
+            AppLogger.Info($"异步命令执行已取消: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("异步命令执行失败", ex);
+            _onError?.Invoke(ex);
+        }
         finally
         {
             _isExecuting = false;
             RaiseCanExecuteChanged();
         }
+    }
+
+    void ICommand.Execute(object? parameter)
+    {
+        _ = ExecuteAsync(parameter);
     }
 
     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);

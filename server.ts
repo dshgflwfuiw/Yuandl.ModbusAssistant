@@ -9,6 +9,7 @@ import type {
   CommunicationType,
   DeviceProfile,
   ModbusServerConfiguration,
+  ModbusServerSecurityOptions,
   ModbusServerTransportMode,
   ModbusTransport,
   SerialPortParameters,
@@ -23,6 +24,7 @@ import { ServerRegisterCodec } from './src/protocol/modbus/serverRegisterCodec.j
 import {
   CommunicationManager,
   ModbusTcpServerService,
+  normalizeServerSecurityOptions,
 } from './src/server/modbusCore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -211,7 +213,7 @@ async function main() {
       }
       if (
         serverConfig &&
-        serverConfig.version === 1 &&
+        (serverConfig.version === 1 || serverConfig.version === 2) &&
         Array.isArray(serverConfig.registers)
       ) {
         modbusServer.port = serverConfig.port;
@@ -222,6 +224,7 @@ async function main() {
         if (serverConfig.serverSerial) {
           modbusServer.serialParams = { ...serverConfig.serverSerial };
         }
+        modbusServer.securityOptions = normalizeServerSecurityOptions(serverConfig, 260);
         modbusServer.configureRegisters(serverConfig.registers);
       }
       broadcast('state', commManager.getSnapshot());
@@ -272,17 +275,19 @@ async function main() {
 
   app.post('/api/server/start', async (req, res) => {
     try {
-      const { port, station, mode, serial } = req.body as {
+      const { port, station, mode, serial, security } = req.body as {
         port: number;
         station: number;
         mode?: ModbusServerTransportMode;
         serial?: SerialPortParameters;
+        security?: ModbusServerSecurityOptions;
       };
       await modbusServer.start(
         Number(port),
         Number(station),
         mode ?? modbusServer.serverMode,
-        serial
+        serial,
+        security
       );
       broadcast('state', commManager.getSnapshot());
       res.json({ ok: true, status: commManager.getSnapshot() });
@@ -379,7 +384,7 @@ async function main() {
   app.post('/api/server/import', (req, res) => {
     try {
       const config = req.body as ModbusServerConfiguration;
-      if (!config || config.version !== 1) {
+      if (!config || (config.version !== 1 && config.version !== 2)) {
         throw new Error(`不支持的配置版本：${config?.version}`);
       }
       if (config.port < 1 || config.port > 65535) {
@@ -391,6 +396,7 @@ async function main() {
       if (!Array.isArray(config.registers)) {
         throw new Error('寄存器配置列表格式不正确');
       }
+      modbusServer.securityOptions = normalizeServerSecurityOptions(config, 260);
       modbusServer.port = config.port;
       modbusServer.station = config.station;
       if (config.serverMode) {
