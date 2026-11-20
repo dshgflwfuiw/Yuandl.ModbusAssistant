@@ -105,7 +105,7 @@ public sealed class ConnectionViewModel : ObservableObject
 
         RefreshPortsCommand = new RelayCommand(RefreshPorts);
         RefreshLocalIpAddressesCommand = new RelayCommand(RefreshLocalIpAddresses);
-        ConnectCommand = new AsyncRelayCommand(ConnectAsync, ex => ConnectionError = ex.Message);
+        ConnectCommand = new AsyncRelayCommand(ConnectAsync);
         DisconnectCommand = new AsyncRelayCommand(() => _comm.DisconnectAsync());
         KickClientCommand = new RelayCommand(p =>
         {
@@ -118,7 +118,7 @@ public sealed class ConnectionViewModel : ObservableObject
                 _server.DisconnectTcpClient(session.SessionId);
         });
 
-        StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync, ex => ServerBanner = $"启动失败: {ex.Message}");
+        StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync);
         StopServerCommand = new AsyncRelayCommand(() => _server.StopAsync());
         AddRegisterCommand = new RelayCommand(AddRegisterDefinition);
         AddRegisterBatchCommand = new RelayCommand(AddRegisterDefinitionsBatch);

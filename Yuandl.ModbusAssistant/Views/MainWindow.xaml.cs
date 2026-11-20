@@ -17,7 +17,6 @@ public partial class MainWindow : FluentWindow, INotifyPropertyChanged
     public MainWindow()
     {
         InitializeComponent();
-        ApplicationThemeManager.Apply(this);
         ToggleNavigationCommand = new RelayCommand(ToggleNavigation);
         DataContextChanged += OnDataContextChanged;
     }

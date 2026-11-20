@@ -6,6 +6,11 @@ using Yuandl.ModbusAssistant.ViewModels;
 using Yuandl.ModbusAssistant.Views;
 using Yuandl.ThemeUI.Appearance;
 using Yuandl.ThemeUI.Controls;
+using Yuandl.ThemeUI.Enums;
+using Yuandl.ThemeUI.Managers;
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfMessageBoxButton = System.Windows.MessageBoxButton;
+using WpfMessageBoxImage = System.Windows.MessageBoxImage;
 
 namespace Yuandl.ModbusAssistant;
 
@@ -58,11 +63,11 @@ public partial class App : Application
         catch (Exception ex)
         {
             AppLogger.Fatal("Yuandl.ThemeUI 启动自检失败", ex);
-            MessageBox.Show(
+            WpfMessageBox.Show(
                 $"界面主题组件 (Yuandl.ThemeUI 2.0.7) 初始化检查失败，程序无法在缺失主题资源下运行：\n{ex.Message}",
                 "Yuandl.ModbusAssistant 启动检查失败",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+                WpfMessageBoxButton.OK,
+                WpfMessageBoxImage.Error);
             Shutdown(-1);
             return;
         }
@@ -83,11 +88,11 @@ public partial class App : Application
     {
         AppLogger.Fatal("UI 线程未处理异常", e.Exception);
         e.Handled = true;
-        MessageBox.Show(
+        WpfMessageBox.Show(
             $"程序遇到未预期错误，但已尝试安全拦截：\n{e.Exception.Message}\n\n详细日志已保存至：\n{AppLogger.LogDirectory}",
             "Yuandl.ModbusAssistant 异常提示",
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
+            WpfMessageBoxButton.OK,
+            WpfMessageBoxImage.Warning);
     }
 
     private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -103,7 +108,7 @@ public partial class App : Application
 
     public void ApplyTheme(bool isDark)
     {
-        ApplicationThemeManager.Apply(isDark ? ApplicationTheme.Dark : ApplicationTheme.Light);
+        ApplicationThemeManager.Apply(isDark ? ApplicationTheme.Dark : ApplicationTheme.Light, WindowBackdropType.None, false);
 
         string themeFile = isDark ? "Themes/DarkTheme.xaml" : "Themes/LightTheme.xaml";
         var source = new Uri($"pack://application:,,,/Yuandl.ModbusAssistant;component/{themeFile}", UriKind.Absolute);

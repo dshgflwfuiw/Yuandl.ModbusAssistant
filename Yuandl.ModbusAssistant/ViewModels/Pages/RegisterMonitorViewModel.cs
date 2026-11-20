@@ -110,7 +110,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
                 SampleServerRegisters();
         });
 
-        SampleOnceCommand = new AsyncRelayCommand(SampleOnceAsync, ex => StatusMessage = $"采集失败: {ex.Message}");
+        SampleOnceCommand = new AsyncRelayCommand(SampleOnceAsync);
         StartCommand = new RelayCommand(StartMonitoring);
         StopCommand = new RelayCommand(() => StopMonitoring("用户停止监听"));
         AddPollingGroupCommand = new RelayCommand(AddPollingGroup);

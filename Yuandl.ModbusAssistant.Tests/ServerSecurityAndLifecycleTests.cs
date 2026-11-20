@@ -12,6 +12,7 @@ using Yuandl.ModbusAssistant.ViewModels;
 using Yuandl.ModbusAssistant.ViewModels.Pages;
 using Yuandl.ThemeUI.Appearance;
 using Yuandl.ThemeUI.Controls;
+using Yuandl.ThemeUI.Managers;
 
 namespace Yuandl.ModbusAssistant.Tests;
 
@@ -68,7 +69,17 @@ public class ServerSecurityAndLifecycleTests
             byte[] req = ModbusFrame.BuildRequest(1, 3, 0, 1, ModbusTransport.Tcp, transactionId: 1);
             await rejectedClient.GetStream().WriteAsync(req);
             var buf = new byte[64];
-            int n = await rejectedClient.GetStream().ReadAsync(buf);
+            int n;
+            try
+            {
+                n = await rejectedClient.GetStream().ReadAsync(buf);
+            }
+            catch (IOException)
+            {
+                // Depending on the Windows TCP stack, a rejected socket may surface as
+                // a graceful EOF or as an aborted connection to the client.
+                n = 0;
+            }
             Assert.Equal(0, n);
         }
         await server.StopAsync();

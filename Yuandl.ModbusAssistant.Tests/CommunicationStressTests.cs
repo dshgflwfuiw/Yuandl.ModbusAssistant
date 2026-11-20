@@ -36,7 +36,13 @@ public class CommunicationStressTests
             AutoReconnect = true,
             ReconnectIntervalMs = 200
         });
-        channel.DataReceived += (_, e) => lock (receivedFrames) { receivedFrames.Add(e.Bytes); };
+        channel.DataReceived += (_, e) =>
+        {
+            lock (receivedFrames)
+            {
+                receivedFrames.Add(e.Bytes);
+            }
+        };
 
         try
         {

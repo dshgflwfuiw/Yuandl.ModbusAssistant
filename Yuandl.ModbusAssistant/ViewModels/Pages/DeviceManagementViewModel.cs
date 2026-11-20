@@ -18,8 +18,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
         _savedSnapshot = loaded.Select(CloneProfile).ToList();
 
         AddProfileCommand = new RelayCommand(AddProfile);
-        LoadProfileCommand = new AsyncRelayCommand(p => ApplyProfileAsync(p, autoConnect: false), ex => StatusBanner = $"载入失败: {ex.Message}");
-        LoadAndConnectCommand = new AsyncRelayCommand(p => ApplyProfileAsync(p, autoConnect: true), ex => StatusBanner = $"连接失败: {ex.Message}");
+        LoadProfileCommand = new AsyncRelayCommand(p => ApplyProfileAsync(p, autoConnect: false));
+        LoadAndConnectCommand = new AsyncRelayCommand(p => ApplyProfileAsync(p, autoConnect: true));
         DeleteProfileCommand = new RelayCommand(p =>
         {
             if (p is DeviceProfile profile)

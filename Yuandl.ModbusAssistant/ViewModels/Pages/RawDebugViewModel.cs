@@ -60,7 +60,7 @@ public sealed class RawDebugViewModel : ObservableObject, IDisposable
             while (Messages.Count > 500) Messages.RemoveAt(Messages.Count - 1);
         });
 
-        SendCommand = new AsyncRelayCommand(SendRawAsync, ex => ErrorText = ex.Message);
+        SendCommand = new AsyncRelayCommand(SendRawAsync);
         ClearCommand = new RelayCommand(() =>
         {
             Messages.Clear();

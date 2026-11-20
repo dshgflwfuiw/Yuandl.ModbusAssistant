@@ -12,8 +12,15 @@ $ProjectPath = Join-Path $RepoRoot "Yuandl.ModbusAssistant\Yuandl.ModbusAssistan
 $SolutionPath = Join-Path $RepoRoot "Yuandl.ModbusAssistant.sln"
 $PublishDir = Join-Path $RepoRoot "dist\$Runtime"
 
-Write-Host "=== 1/4 Running xUnit Test Suite ===" -ForegroundColor Cyan
-dotnet test $SolutionPath --configuration $Configuration
+Write-Host "=== 1/4 Restoring and running xUnit test suite ===" -ForegroundColor Cyan
+dotnet restore $SolutionPath
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet restore failed with exit code $LASTEXITCODE"
+}
+dotnet test $SolutionPath --configuration $Configuration --no-restore --verbosity normal
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet test failed with exit code $LASTEXITCODE"
+}
 
 Write-Host "=== 2/4 Publishing WPF Desktop App ($Runtime) ===" -ForegroundColor Cyan
 if (Test-Path $PublishDir) {

@@ -259,7 +259,7 @@ public sealed class ModbusServerService : IDisposable
         bool needsTcp = mode is ModbusServerTransportMode.Tcp or ModbusServerTransportMode.TcpAndSerial;
         bool needsSerial = mode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
 
-        if (needsTcp && port is < 1 or > 65535)
+        if (needsTcp && port is < 0 or > 65535)
             throw new ArgumentOutOfRangeException(nameof(port), "服务器端口必须在 1 至 65535 之间");
 
         var normalizedSecurity = NormalizeSecurityOptions(securityOptions ?? SecurityOptions);
@@ -287,6 +287,7 @@ public sealed class ModbusServerService : IDisposable
                 var listener = new TcpListener(bindIp, port);
                 listener.Start();
                 _tcpListener = listener;
+                Port = ((IPEndPoint)listener.LocalEndpoint).Port;
                 _tcpAcceptTask = Task.Run(() => TcpAcceptLoopAsync(listener, _cts.Token), CancellationToken.None);
             }
 
@@ -408,6 +409,25 @@ public sealed class ModbusServerService : IDisposable
 
     private void NotifyClientsChanged() => ClientsChanged?.Invoke(this, GetTcpClients());
 
+    private static void GracefullyCloseRejectedClient(TcpClient client)
+    {
+        try
+        {
+            client.Client.Shutdown(SocketShutdown.Both);
+        }
+        catch (SocketException)
+        {
+            // The peer may already have disconnected; disposal below is sufficient.
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
     private async Task TcpAcceptLoopAsync(TcpListener listener, CancellationToken token)
     {
         string exitReason = "正常停止";
@@ -424,14 +444,14 @@ public sealed class ModbusServerService : IDisposable
                 if (!ChannelSecurityHelper.IsIpAllowed(endpoint?.Address, _allowedClientIps))
                 {
                     AppLogger.Warn($"Modbus TCP 从站拒绝非白名单客户端: {remoteIpText}:{remotePort}");
-                    try { client.Dispose(); } catch { }
+                    GracefullyCloseRejectedClient(client);
                     continue;
                 }
 
                 if (_tcpClients.Count >= SecurityOptions.MaxClients)
                 {
                     AppLogger.Warn($"Modbus TCP 从站达到最大客户端上限 ({SecurityOptions.MaxClients})，拒绝 {remoteIpText}:{remotePort}");
-                    try { client.Dispose(); } catch { }
+                    GracefullyCloseRejectedClient(client);
                     continue;
                 }
 
