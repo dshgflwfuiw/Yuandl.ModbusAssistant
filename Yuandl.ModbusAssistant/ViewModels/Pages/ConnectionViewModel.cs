@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text;
 using System.Windows;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
@@ -77,6 +79,9 @@ public sealed class ConnectionViewModel : ObservableObject
         _comm.StateChanged += (_, s) => RunOnUi(() =>
         {
             ChannelState = s;
+            ChannelModeNotice = s == ChannelState.Connected && _comm.IsVirtualLoopback
+                ? "提示：当前串口运行于内置虚拟环回仿真模式，未占用物理 COM 端口。"
+                : string.Empty;
             NotifyVisibilityProperties();
         });
         _comm.ClientsChanged += (_, clients) => RunOnUi(() =>
@@ -90,6 +95,11 @@ public sealed class ConnectionViewModel : ObservableObject
             ServerStatusText = text;
             IsModbusServerRunning = _server.IsRunning;
         });
+        _server.ClientsChanged += (_, clients) => RunOnUi(() =>
+        {
+            ModbusServerClients.Clear();
+            foreach (var c in clients) ModbusServerClients.Add(c);
+        });
 
         RefreshPortsCommand = new RelayCommand(RefreshPorts);
         RefreshLocalIpAddressesCommand = new RelayCommand(RefreshLocalIpAddresses);
@@ -99,6 +109,11 @@ public sealed class ConnectionViewModel : ObservableObject
         {
             if (p is TcpServerClientSession session)
                 _comm.DisconnectServerClient(session.SessionId);
+        });
+        KickModbusServerClientCommand = new RelayCommand(p =>
+        {
+            if (p is TcpServerClientSession session)
+                _server.DisconnectTcpClient(session.SessionId);
         });
 
         StartServerCommand = new AsyncRelayCommand(StartModbusServerAsync);
@@ -133,10 +148,13 @@ public sealed class ConnectionViewModel : ObservableObject
         });
         ExportConfigCommand = new RelayCommand(ExportServerConfig);
         ImportConfigCommand = new RelayCommand(ImportServerConfig);
+        ExportCsvCommand = new RelayCommand(ExportRegistersCsv);
+        ImportCsvCommand = new RelayCommand(ImportRegistersCsv);
     }
 
     public ObservableCollection<string> AvailablePorts { get; } = new();
     public ObservableCollection<TcpServerClientSession> ServerClients { get; } = new();
+    public ObservableCollection<TcpServerClientSession> ModbusServerClients { get; } = new();
     public ObservableCollection<ServerRegisterRowViewModel> ServerRegisters { get; } = new();
 
     public IReadOnlyList<CommunicationType> CommunicationTypes { get; } = Enum.GetValues<CommunicationType>();
@@ -181,11 +199,39 @@ public sealed class ConnectionViewModel : ObservableObject
     public bool IsUdpSelected => SelectedType == CommunicationType.Udp;
     public bool IsTcpServerSelected => SelectedType == CommunicationType.TcpServer;
 
+    private bool _allowClientVirtualLoopback = true;
+    public bool AllowClientVirtualLoopback
+    {
+        get => _allowClientVirtualLoopback;
+        set => SetProperty(ref _allowClientVirtualLoopback, value);
+    }
+
+    private bool _allowServerVirtualFallback = true;
+    public bool AllowServerVirtualFallback
+    {
+        get => _allowServerVirtualFallback;
+        set => SetProperty(ref _allowServerVirtualFallback, value);
+    }
+
+    private string _channelModeNotice = string.Empty;
+    public string ChannelModeNotice
+    {
+        get => _channelModeNotice;
+        private set => SetProperty(ref _channelModeNotice, value);
+    }
+
     private string _localIpAddressesText = "未检测到可用 IPv4 地址";
     public string LocalIpAddressesText
     {
         get => _localIpAddressesText;
         private set => SetProperty(ref _localIpAddressesText, value);
+    }
+
+    private string _serverLocalIpAddressesText = "未检测到可用 IPv4 地址";
+    public string ServerLocalIpAddressesText
+    {
+        get => _serverLocalIpAddressesText;
+        private set => SetProperty(ref _serverLocalIpAddressesText, value);
     }
 
     private string _connectionError = string.Empty;
@@ -195,7 +241,6 @@ public sealed class ConnectionViewModel : ObservableObject
         set => SetProperty(ref _connectionError, value);
     }
 
-    // Modbus Server settings
     private ModbusServerTransportMode _serverMode = ModbusServerTransportMode.Tcp;
     public ModbusServerTransportMode ServerMode
     {
@@ -214,10 +259,22 @@ public sealed class ConnectionViewModel : ObservableObject
     public bool ServerUsesSerial => ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
 
     private int _serverPort = 5020;
-    public int ServerPort { get => _serverPort; set => SetProperty(ref _serverPort, value); }
+    public int ServerPort
+    {
+        get => _serverPort;
+        set
+        {
+            if (SetProperty(ref _serverPort, Math.Clamp(value, 1, 65535)))
+                RefreshLocalIpAddresses();
+        }
+    }
 
     private int _serverStation = 1;
-    public int ServerStation { get => _serverStation; set => SetProperty(ref _serverStation, value); }
+    public int ServerStation
+    {
+        get => _serverStation;
+        set => SetProperty(ref _serverStation, Math.Clamp(value, 1, 247));
+    }
 
     public SerialPortParameters ServerSerial { get; } = new();
 
@@ -242,7 +299,6 @@ public sealed class ConnectionViewModel : ObservableObject
         set => SetProperty(ref _serverBanner, value);
     }
 
-    // New Register Definition draft
     private ServerRegisterArea _newArea = ServerRegisterArea.HoldingRegister;
     public ServerRegisterArea NewArea
     {
@@ -266,7 +322,7 @@ public sealed class ConnectionViewModel : ObservableObject
     }
 
     private int _newAddress;
-    public int NewAddress { get => _newAddress; set => SetProperty(ref _newAddress, value); }
+    public int NewAddress { get => _newAddress; set => SetProperty(ref _newAddress, Math.Clamp(value, 0, 65535)); }
 
     private int _newRegisterCount = 10;
     public int NewRegisterCount
@@ -292,6 +348,7 @@ public sealed class ConnectionViewModel : ObservableObject
     public AsyncRelayCommand ConnectCommand { get; }
     public AsyncRelayCommand DisconnectCommand { get; }
     public RelayCommand KickClientCommand { get; }
+    public RelayCommand KickModbusServerClientCommand { get; }
     public AsyncRelayCommand StartServerCommand { get; }
     public AsyncRelayCommand StopServerCommand { get; }
     public RelayCommand AddRegisterCommand { get; }
@@ -302,10 +359,92 @@ public sealed class ConnectionViewModel : ObservableObject
     public RelayCommand ResetRegistersCommand { get; }
     public RelayCommand ExportConfigCommand { get; }
     public RelayCommand ImportConfigCommand { get; }
+    public RelayCommand ExportCsvCommand { get; }
+    public RelayCommand ImportCsvCommand { get; }
+
+    public async Task ApplyDeviceProfileAsync(DeviceProfile profile, bool autoConnect)
+    {
+        ConnectionError = string.Empty;
+        try
+        {
+            string protocol = profile.Protocol?.Trim() ?? "Modbus TCP";
+            string endpoint = profile.Endpoint?.Trim() ?? string.Empty;
+
+            if (protocol.Contains("RTU", StringComparison.OrdinalIgnoreCase) ||
+                protocol.Contains("ASCII", StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedType = CommunicationType.SerialPort;
+                var parts = endpoint.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 1 && !string.IsNullOrWhiteSpace(parts[0]))
+                {
+                    Serial.PortName = parts[0];
+                    if (!AvailablePorts.Contains(parts[0]))
+                        AvailablePorts.Add(parts[0]);
+                }
+                if (parts.Length >= 2 && int.TryParse(parts[1], out int baud))
+                    Serial.BaudRate = baud;
+            }
+            else if (protocol.Contains("TCP Server", StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedType = CommunicationType.TcpServer;
+                if (TryParseHostAndPort(endpoint, 6000, out _, out int listenPort))
+                    TcpServer.ListenPort = listenPort;
+            }
+            else if (protocol.Contains("UDP", StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedType = CommunicationType.Udp;
+                if (TryParseHostAndPort(endpoint, 502, out string host, out int port))
+                {
+                    Udp.RemoteHost = host;
+                    Udp.RemotePort = port;
+                }
+            }
+            else
+            {
+                SelectedType = CommunicationType.TcpClient;
+                if (TryParseHostAndPort(endpoint, 5020, out string host, out int port))
+                {
+                    TcpClient.Host = host;
+                    TcpClient.Port = port;
+                }
+            }
+
+            if (autoConnect)
+                await ConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            ConnectionError = $"应用设备方案失败: {ex.Message}";
+        }
+    }
+
+    private static bool TryParseHostAndPort(string endpoint, int defaultPort, out string host, out int port)
+    {
+        host = "127.0.0.1";
+        port = defaultPort;
+        if (string.IsNullOrWhiteSpace(endpoint)) return false;
+
+        int colonIdx = endpoint.LastIndexOf(':');
+        if (colonIdx > 0 && int.TryParse(endpoint[(colonIdx + 1)..], out int parsedPort) && parsedPort is >= 1 and <= 65535)
+        {
+            host = endpoint[..colonIdx].Trim();
+            port = parsedPort;
+            return true;
+        }
+
+        if (int.TryParse(endpoint, out int portOnly) && portOnly is >= 1 and <= 65535)
+        {
+            port = portOnly;
+            return true;
+        }
+
+        host = endpoint;
+        return true;
+    }
 
     public void RefreshLocalIpAddresses()
     {
-        var addresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rawAddresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -316,11 +455,10 @@ public sealed class ConnectionViewModel : ObservableObject
                 {
                     foreach (var address in network.GetIPProperties().UnicastAddresses
                         .Select(address => address.Address)
-                        .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address))
-                        .Distinct()
-                        .OrderBy(address => address.ToString(), StringComparer.Ordinal)
-                        )
-                        addresses.Add($"{address}:{TcpServer.ListenPort}");
+                        .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address)))
+                    {
+                        rawAddresses.Add(address.ToString());
+                    }
                 }
                 catch (NetworkInformationException)
                 {
@@ -330,12 +468,21 @@ public sealed class ConnectionViewModel : ObservableObject
         catch (NetworkInformationException ex)
         {
             LocalIpAddressesText = $"读取失败：{ex.Message}";
+            ServerLocalIpAddressesText = LocalIpAddressesText;
             return;
         }
 
-        LocalIpAddressesText = addresses.Count > 0
-            ? string.Join("  |  ", addresses.OrderBy(address => address, StringComparer.OrdinalIgnoreCase))
-            : "无可用 IPv4 地址";
+        if (rawAddresses.Count > 0)
+        {
+            var sorted = rawAddresses.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
+            LocalIpAddressesText = string.Join("  |  ", sorted.Select(a => $"{a}:{TcpServer.ListenPort}"));
+            ServerLocalIpAddressesText = string.Join("  |  ", sorted.Select(a => $"{a}:{ServerPort}"));
+        }
+        else
+        {
+            LocalIpAddressesText = $"127.0.0.1:{TcpServer.ListenPort}";
+            ServerLocalIpAddressesText = $"127.0.0.1:{ServerPort}";
+        }
     }
 
     public void RefreshPorts()
@@ -368,15 +515,27 @@ public sealed class ConnectionViewModel : ObservableObject
             switch (SelectedType)
             {
                 case CommunicationType.SerialPort:
-                    await _comm.ConnectSerialAsync(Serial, _server);
+                    if (string.IsNullOrWhiteSpace(Serial.PortName))
+                        throw new ArgumentException("请输入或选择串口号");
+                    await _comm.ConnectSerialAsync(Serial, _server, AllowClientVirtualLoopback);
                     break;
                 case CommunicationType.TcpClient:
+                    if (string.IsNullOrWhiteSpace(TcpClient.Host))
+                        throw new ArgumentException("目标主机地址不能为空");
+                    if (TcpClient.Port is < 1 or > 65535)
+                        throw new ArgumentOutOfRangeException(nameof(TcpClient.Port), "TCP 端口必须在 1 至 65535 之间");
                     await _comm.ConnectTcpClientAsync(TcpClient);
                     break;
                 case CommunicationType.Udp:
+                    if (string.IsNullOrWhiteSpace(Udp.RemoteHost))
+                        throw new ArgumentException("UDP 远端主机不能为空");
+                    if (Udp.RemotePort is < 1 or > 65535)
+                        throw new ArgumentOutOfRangeException(nameof(Udp.RemotePort), "UDP 远端端口必须在 1 至 65535 之间");
                     await _comm.ConnectUdpAsync(Udp);
                     break;
                 case CommunicationType.TcpServer:
+                    if (TcpServer.ListenPort is < 1 or > 65535)
+                        throw new ArgumentOutOfRangeException(nameof(TcpServer.ListenPort), "监听端口必须在 1 至 65535 之间");
                     await _comm.StartTcpServerAsync(TcpServer);
                     break;
             }
@@ -393,7 +552,7 @@ public sealed class ConnectionViewModel : ObservableObject
         try
         {
             ApplyRegistersToServerAndSave();
-            await _server.StartAsync(ServerPort, ServerStation, ServerMode, ServerSerial);
+            await _server.StartAsync(ServerPort, ServerStation, ServerMode, ServerSerial, AllowServerVirtualFallback);
             SaveServerConfig();
         }
         catch (Exception ex)
@@ -523,6 +682,7 @@ public sealed class ConnectionViewModel : ObservableObject
         {
             ReloadRegisterRows(cfg.Registers);
         }
+        RefreshLocalIpAddresses();
     }
 
     private void SaveServerConfig()
@@ -585,7 +745,7 @@ public sealed class ConnectionViewModel : ObservableObject
                 ServerSerial = ServerSerial.Clone(),
                 Registers = ServerRegisters.Select(r => r.ToModel()).ToList()
             };
-            File.WriteAllText(dlg.FileName, PersistenceService.SerializeServerConfig(cfg));
+            File.WriteAllText(dlg.FileName, PersistenceService.SerializeServerConfig(cfg), Encoding.UTF8);
             ServerBanner = $"已导出配置: {dlg.FileName}";
         }
     }
@@ -600,7 +760,7 @@ public sealed class ConnectionViewModel : ObservableObject
         {
             try
             {
-                var cfg = PersistenceService.DeserializeServerConfig(File.ReadAllText(dlg.FileName))
+                var cfg = PersistenceService.DeserializeServerConfig(File.ReadAllText(dlg.FileName, Encoding.UTF8))
                     ?? throw new InvalidDataException("配置文件格式无效");
                 ServerPort = cfg.Port;
                 ServerStation = cfg.Station;
@@ -621,6 +781,145 @@ public sealed class ConnectionViewModel : ObservableObject
                 ServerBanner = $"导入失败: {ex.Message}";
             }
         }
+    }
+
+    private void ExportRegistersCsv()
+    {
+        var dlg = new SaveFileDialog
+        {
+            Filter = "CSV 点表文件 (*.csv)|*.csv",
+            FileName = $"modbus-point-table-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Area,Address,DataType,ByteOrder,InitialValue,CurrentValue,Note");
+        foreach (var row in ServerRegisters)
+        {
+            sb.AppendLine(string.Join(",",
+                EscapeCsv(row.Area.ToString()),
+                row.Address.ToString(CultureInfo.InvariantCulture),
+                EscapeCsv(row.DataType.ToString()),
+                EscapeCsv(row.ByteOrder.ToString()),
+                EscapeCsv(row.InitialValue),
+                EscapeCsv(row.CurrentValue),
+                EscapeCsv(row.Note)));
+        }
+        File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        ServerBanner = $"已导出点表 CSV ({ServerRegisters.Count} 项): {dlg.FileName}";
+    }
+
+    private void ImportRegistersCsv()
+    {
+        var dlg = new OpenFileDialog
+        {
+            Filter = "CSV 点表文件 (*.csv)|*.csv"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            var lines = File.ReadAllLines(dlg.FileName, Encoding.UTF8)
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToList();
+            if (lines.Count == 0)
+                throw new InvalidDataException("CSV 文件为空");
+
+            var imported = new List<ServerRegisterDefinition>();
+            int startIndex = lines[0].StartsWith("Area,", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            for (int i = startIndex; i < lines.Count; i++)
+            {
+                var cols = ParseCsvLine(lines[i]);
+                if (cols.Count < 5)
+                    throw new FormatException($"第 {i + 1} 行列数不足（至少需要 Area,Address,DataType,ByteOrder,InitialValue）");
+
+                if (!Enum.TryParse<ServerRegisterArea>(cols[0], ignoreCase: true, out var area))
+                    throw new FormatException($"第 {i + 1} 行存储区无效: {cols[0]}");
+                if (!int.TryParse(cols[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int address))
+                    throw new FormatException($"第 {i + 1} 行地址无效: {cols[1]}");
+                if (!Enum.TryParse<ServerRegisterDataType>(cols[2], ignoreCase: true, out var dataType))
+                    throw new FormatException($"第 {i + 1} 行数据类型无效: {cols[2]}");
+                if (!Enum.TryParse<ServerRegisterByteOrder>(cols[3], ignoreCase: true, out var byteOrder))
+                    throw new FormatException($"第 {i + 1} 行字节序无效: {cols[3]}");
+
+                string initial = cols[4];
+                string note = cols.Count >= 7 ? cols[6] : (cols.Count == 6 ? cols[5] : string.Empty);
+
+                var def = new ServerRegisterDefinition
+                {
+                    Area = area,
+                    Address = address,
+                    DataType = dataType,
+                    ByteOrder = byteOrder,
+                    InitialValue = initial,
+                    CurrentValue = initial,
+                    Note = note
+                };
+                ServerRegisterCodec.Validate(def);
+                imported.Add(def);
+            }
+
+            ServerRegisterCodec.ValidateNoOverlap(imported);
+            _server.ConfigureRegisters(imported);
+            ReloadRegisterRows(_server.GetDefinitionsWithCurrentValues());
+            SaveServerConfig();
+            ServerBanner = $"已从 CSV 导入 {imported.Count} 项点表定义";
+        }
+        catch (Exception ex)
+        {
+            ServerBanner = $"CSV 导入失败: {ex.Message}";
+        }
+    }
+
+    private static string EscapeCsv(string? value)
+    {
+        var s = value ?? string.Empty;
+        if (s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r'))
+            return $"\"{s.Replace("\"", "\"\"")}\"";
+        return s;
+    }
+
+    private static List<string> ParseCsvLine(string line)
+    {
+        var result = new List<string>();
+        var current = new StringBuilder();
+        bool inQuotes = false;
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (inQuotes)
+            {
+                if (c == '"' && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    current.Append('"');
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    inQuotes = false;
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            else if (c == '"')
+            {
+                inQuotes = true;
+            }
+            else if (c == ',')
+            {
+                result.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+        result.Add(current.ToString().Trim());
+        return result;
     }
 
     private void NotifyVisibilityProperties()

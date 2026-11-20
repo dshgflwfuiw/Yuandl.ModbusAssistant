@@ -1,5 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
 using System.Windows;
+using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;
 using Yuandl.ModbusAssistant.Models;
@@ -18,6 +21,7 @@ public enum PacketCaptureTransportMode
 
 public sealed class PacketAnalysisViewModel : ObservableObject
 {
+    private const int MaxRttSamples = 2000;
     private readonly CommunicationService _comm;
     private readonly List<double> _rttHistory = new();
     private DateTime? _pendingTxTimestamp;
@@ -30,6 +34,7 @@ public sealed class PacketAnalysisViewModel : ObservableObject
 
         ClearCommand = new RelayCommand(ClearAll);
         ParseManualCommand = new RelayCommand(ParseManualFrame);
+        ExportLogCommand = new RelayCommand(ExportPackets);
     }
 
     public ObservableCollection<AnalyzedPacketEntry> CapturedPackets { get; } = new();
@@ -38,6 +43,9 @@ public sealed class PacketAnalysisViewModel : ObservableObject
 
     private bool _isCapturing = true;
     public bool IsCapturing { get => _isCapturing; set => SetProperty(ref _isCapturing, value); }
+
+    private bool _autoScroll = true;
+    public bool AutoScroll { get => _autoScroll; set => SetProperty(ref _autoScroll, value); }
 
     private PacketCaptureTransportMode _captureTransport = PacketCaptureTransportMode.Auto;
     public PacketCaptureTransportMode CaptureTransport { get => _captureTransport; set => SetProperty(ref _captureTransport, value); }
@@ -54,7 +62,6 @@ public sealed class PacketAnalysisViewModel : ObservableObject
     private string _rttStatsSummary = "平均 — | 最小 — | 最大 —";
     public string RttStatsSummary { get => _rttStatsSummary; private set => SetProperty(ref _rttStatsSummary, value); }
 
-    // Manual hex analyzer
     private ModbusTransport _manualTransport = ModbusTransport.Rtu;
     public ModbusTransport ManualTransport { get => _manualTransport; set => SetProperty(ref _manualTransport, value); }
 
@@ -66,6 +73,42 @@ public sealed class PacketAnalysisViewModel : ObservableObject
 
     public RelayCommand ClearCommand { get; }
     public RelayCommand ParseManualCommand { get; }
+    public RelayCommand ExportLogCommand { get; }
+
+    private void ExportPackets()
+    {
+        if (CapturedPackets.Count == 0)
+        {
+            ManualResultText = "暂无可导出的捕获报文";
+            return;
+        }
+
+        var dlg = new SaveFileDialog
+        {
+            Filter = "CSV 文件 (*.csv)|*.csv|文本日志 (*.txt)|*.txt",
+            FileName = $"modbus-packets-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        bool isTxt = Path.GetExtension(dlg.FileName).Equals(".txt", StringComparison.OrdinalIgnoreCase);
+        var sb = new StringBuilder();
+        if (isTxt)
+        {
+            foreach (var p in CapturedPackets.Reverse())
+                sb.AppendLine($"[{p.Timestamp}] [{p.Direction}] [{p.Transport}] RTT={p.RttText} HEX={p.Hex} | {p.Result}");
+        }
+        else
+        {
+            sb.AppendLine("Timestamp,Direction,Transport,Rtt,Hex,Result");
+            foreach (var p in CapturedPackets.Reverse())
+            {
+                string result = (p.Result ?? string.Empty).Replace("\"", "\"\"");
+                sb.AppendLine($"{p.Timestamp},{p.Direction},{p.Transport},\"{p.RttText}\",\"{p.Hex}\",\"{result}\"");
+            }
+        }
+        File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        ManualResultText = $"已导出 {CapturedPackets.Count} 条分析报文: {dlg.FileName}";
+    }
 
     private void HandleTraffic(TrafficEventArgs e)
     {
@@ -84,6 +127,8 @@ public sealed class PacketAnalysisViewModel : ObservableObject
             rttMs = Math.Max(0, (e.Timestamp - _pendingTxTimestamp.Value).TotalMilliseconds);
             _pendingTxTimestamp = null;
             _rttHistory.Add(rttMs.Value);
+            while (_rttHistory.Count > MaxRttSamples)
+                _rttHistory.RemoveAt(0);
             MatchedPairs++;
             UpdateRttStats();
         }

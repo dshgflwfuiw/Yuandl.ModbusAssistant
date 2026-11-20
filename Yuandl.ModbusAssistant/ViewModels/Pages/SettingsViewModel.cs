@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using Yuandl.ModbusAssistant.Models;
 using Yuandl.ModbusAssistant.Services;
 
@@ -16,9 +18,12 @@ public sealed class SettingsViewModel : ObservableObject
         _defaultRetryTimes = Math.Clamp(saved.DefaultRetryTimes, 0, 10);
 
         SaveCommand = new RelayCommand(SaveSettings);
+        OpenLogFolderCommand = new RelayCommand(OpenLogFolder);
     }
 
     public event EventHandler<bool>? ThemeChanged;
+
+    public string LogDirectory => AppLogger.LogDirectory;
 
     private bool _isDarkTheme;
     public bool IsDarkTheme
@@ -73,6 +78,7 @@ public sealed class SettingsViewModel : ObservableObject
     public string SaveBanner { get => _saveBanner; private set => SetProperty(ref _saveBanner, value); }
 
     public RelayCommand SaveCommand { get; }
+    public RelayCommand OpenLogFolderCommand { get; }
 
     private void SaveSettings()
     {
@@ -83,5 +89,18 @@ public sealed class SettingsViewModel : ObservableObject
             DefaultRetryTimes = DefaultRetryTimes
         });
         SaveBanner = $"系统设置已保存 ({DateTime.Now:HH:mm:ss})";
+    }
+
+    private void OpenLogFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppLogger.LogDirectory);
+            Process.Start(new ProcessStartInfo(AppLogger.LogDirectory) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            SaveBanner = $"无法打开日志目录: {ex.Message}";
+        }
     }
 }

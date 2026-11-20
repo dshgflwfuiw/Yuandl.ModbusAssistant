@@ -18,6 +18,13 @@ public sealed class ModbusServerService : IDisposable
         public ModbusErrorCodeException(byte code) => Code = code;
     }
 
+    private sealed class TcpClientEntry
+    {
+        public required TcpServerClientSession Info { get; init; }
+        public required TcpClient Client { get; init; }
+        public required NetworkStream Stream { get; init; }
+    }
+
     private readonly ushort[] _holdingRegisters = new ushort[65536];
     private readonly ushort[] _inputRegisters = new ushort[65536];
     private readonly byte[] _coils = new byte[65536];
@@ -26,7 +33,8 @@ public sealed class ModbusServerService : IDisposable
 
     private List<ServerRegisterDefinition> _definitions = new();
     private TcpListener? _tcpListener;
-    private readonly ConcurrentDictionary<TcpClient, byte> _tcpClients = new();
+    private readonly ConcurrentDictionary<string, TcpClientEntry> _tcpClients = new();
+    private int _nextTcpClientNumber;
     private SerialPort? _serialPort;
     private CancellationTokenSource? _cts;
     private Task? _tcpAcceptTask;
@@ -41,6 +49,27 @@ public sealed class ModbusServerService : IDisposable
     public string StatusText { get; private set; } = "服务器已停止";
 
     public bool IsSerialActive => IsRunning && ServerMode is ModbusServerTransportMode.SerialRtu or ModbusServerTransportMode.SerialAscii or ModbusServerTransportMode.TcpAndSerial;
+
+    public IReadOnlyList<TcpServerClientSession> GetTcpClients() =>
+        _tcpClients.Values.Select(c => new TcpServerClientSession
+        {
+            SessionId = c.Info.SessionId,
+            RemoteAddress = c.Info.RemoteAddress,
+            RemotePort = c.Info.RemotePort,
+            ConnectedAt = c.Info.ConnectedAt,
+            BytesSent = c.Info.BytesSent,
+            BytesReceived = c.Info.BytesReceived
+        }).OrderBy(c => c.ConnectedAt).ToList();
+
+    public void DisconnectTcpClient(string sessionId)
+    {
+        if (_tcpClients.TryRemove(sessionId, out var entry))
+        {
+            try { entry.Stream.Dispose(); } catch { }
+            try { entry.Client.Dispose(); } catch { }
+            NotifyClientsChanged();
+        }
+    }
 
     public bool IsSerialEndpointMatch(SerialPortParameters clientSerial) =>
         IsSerialActive &&
@@ -58,6 +87,7 @@ public sealed class ModbusServerService : IDisposable
 
     public event EventHandler? RegistersMutated;
     public event EventHandler<string>? StatusChanged;
+    public event EventHandler<IReadOnlyList<TcpServerClientSession>>? ClientsChanged;
 
     public void ConfigureRegisters(IEnumerable<ServerRegisterDefinition> defs)
     {
@@ -208,7 +238,8 @@ public sealed class ModbusServerService : IDisposable
         int port,
         int station = 1,
         ModbusServerTransportMode mode = ModbusServerTransportMode.Tcp,
-        SerialPortParameters? serial = null)
+        SerialPortParameters? serial = null,
+        bool allowLoopbackFallback = true)
     {
         if (station is < 1 or > 247)
             throw new ArgumentOutOfRangeException(nameof(station), "站号必须在 1 至 247 之间");
@@ -256,17 +287,26 @@ public sealed class ModbusServerService : IDisposable
                     sp.Open();
                     _serialPort = sp;
                     _serialReadTask = Task.Run(() => SerialReadLoopAsync(sp, _cts.Token), CancellationToken.None);
+                    AppLogger.Info($"内置 Modbus 从站已打开物理串口 {targetSerial.PortName}");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Physical/driver COM port not available: keep virtual in-memory serial server active for loopback debugging
+                    if (!allowLoopbackFallback)
+                    {
+                        AppLogger.Error($"内置 Modbus 从站打开物理串口 {targetSerial.PortName} 失败", ex);
+                        throw new InvalidOperationException($"无法打开从站物理串口 {targetSerial.PortName}: {ex.Message}", ex);
+                    }
+
                     IsSerialLoopbackFallback = true;
+                    AppLogger.Warn($"内置 Modbus 从站无法打开物理串口 {targetSerial.PortName} ({ex.Message})，已切换至内联仿真模式");
                 }
             }
 
             IsRunning = true;
             StatusText = BuildRunningStatusText();
             StatusChanged?.Invoke(this, StatusText);
+            NotifyClientsChanged();
+            AppLogger.Info($"内置 Modbus 从站已启动: {StatusText}");
         }
         catch
         {
@@ -288,11 +328,15 @@ public sealed class ModbusServerService : IDisposable
         try { _tcpListener?.Stop(); } catch { }
         _tcpListener = null;
 
-        foreach (var client in _tcpClients.Keys.ToArray())
+        foreach (var id in _tcpClients.Keys.ToArray())
         {
-            try { client.Dispose(); } catch { }
+            if (_tcpClients.TryRemove(id, out var entry))
+            {
+                try { entry.Stream.Dispose(); } catch { }
+                try { entry.Client.Dispose(); } catch { }
+            }
         }
-        _tcpClients.Clear();
+        NotifyClientsChanged();
 
         if (_serialPort != null)
         {
@@ -325,7 +369,7 @@ public sealed class ModbusServerService : IDisposable
     private string BuildRunningStatusText()
     {
         string serialSummary = $"{SerialParams.PortName} ({SerialParams.BaudRate},{SerialParams.DataBits},{SerialParams.Parity},{SerialParams.StopBits})";
-        string serialModeTag = IsSerialLoopbackFallback ? "内联仿真串口" : "串口";
+        string serialModeTag = IsSerialLoopbackFallback ? "内联仿真串口" : "物理串口";
         int count = _definitions.Count;
         return ServerMode switch
         {
@@ -336,6 +380,8 @@ public sealed class ModbusServerService : IDisposable
         };
     }
 
+    private void NotifyClientsChanged() => ClientsChanged?.Invoke(this, GetTcpClients());
+
     private async Task TcpAcceptLoopAsync(TcpListener listener, CancellationToken token)
     {
         while (!token.IsCancellationRequested)
@@ -344,8 +390,23 @@ public sealed class ModbusServerService : IDisposable
             {
                 var client = await listener.AcceptTcpClientAsync(token);
                 client.NoDelay = true;
-                _tcpClients[client] = 1;
-                _ = Task.Run(() => HandleTcpClientAsync(client, token), CancellationToken.None);
+                var endpoint = client.Client.RemoteEndPoint as IPEndPoint;
+                string sessionId = $"M{Interlocked.Increment(ref _nextTcpClientNumber)}";
+                var entry = new TcpClientEntry
+                {
+                    Info = new TcpServerClientSession
+                    {
+                        SessionId = sessionId,
+                        RemoteAddress = endpoint?.Address.ToString() ?? "unknown",
+                        RemotePort = endpoint?.Port ?? 0,
+                        ConnectedAt = DateTime.Now
+                    },
+                    Client = client,
+                    Stream = client.GetStream()
+                };
+                _tcpClients[sessionId] = entry;
+                NotifyClientsChanged();
+                _ = Task.Run(() => HandleTcpClientAsync(entry, token), CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
@@ -358,18 +419,19 @@ public sealed class ModbusServerService : IDisposable
         }
     }
 
-    private async Task HandleTcpClientAsync(TcpClient client, CancellationToken token)
+    private async Task HandleTcpClientAsync(TcpClientEntry entry, CancellationToken token)
     {
         var buffer = new List<byte>();
         var chunk = new byte[4096];
         try
         {
-            var stream = client.GetStream();
-            while (!token.IsCancellationRequested && client.Connected)
+            var stream = entry.Stream;
+            while (!token.IsCancellationRequested && entry.Client.Connected)
             {
                 int read = await stream.ReadAsync(chunk, token);
                 if (read == 0) break;
 
+                entry.Info.BytesReceived += read;
                 for (int i = 0; i < read; i++) buffer.Add(chunk[i]);
 
                 while (buffer.Count >= 7)
@@ -389,7 +451,9 @@ public sealed class ModbusServerService : IDisposable
                     byte unitId = frame[6];
                     var pdu = new byte[frame.Length - 7];
                     Array.Copy(frame, 7, pdu, 0, pdu.Length);
-                    var responsePdu = ProcessRequest(unitId, pdu);
+                    var responsePdu = ProcessRequest(unitId, pdu, out bool suppressReply);
+                    if (suppressReply || responsePdu.Length == 0)
+                        continue;
 
                     var response = new byte[7 + responsePdu.Length];
                     Array.Copy(frame, 0, response, 0, 4);
@@ -401,14 +465,15 @@ public sealed class ModbusServerService : IDisposable
 
                     await stream.WriteAsync(response, token);
                     await stream.FlushAsync(token);
+                    entry.Info.BytesSent += response.Length;
                 }
+                NotifyClientsChanged();
             }
         }
         catch { /* ignore disconnect */ }
         finally
         {
-            _tcpClients.TryRemove(client, out _);
-            try { client.Dispose(); } catch { }
+            DisconnectTcpClient(entry.Info.SessionId);
         }
     }
 
@@ -486,17 +551,48 @@ public sealed class ModbusServerService : IDisposable
                 continue;
             }
 
-            if (buffer.Count < 2) return false;
+            if (buffer.Count < 4) return false;
             int functionCode = buffer[1];
-            int expectedLength = functionCode switch
+            int expectedLength;
+            if (functionCode is 1 or 2 or 3 or 4 or 5 or 6)
             {
-                1 or 2 or 3 or 4 or 5 or 6 => 8,
-                15 or 16 when buffer.Count < 7 => 0,
-                15 or 16 => 9 + buffer[6],
-                _ => 4
-            };
+                expectedLength = 8;
+            }
+            else if (functionCode is 15 or 16)
+            {
+                if (buffer.Count < 7) return false;
+                int qty = (buffer[4] << 8) | buffer[5];
+                int bc = buffer[6];
+                bool validMultiHeader = functionCode == 15
+                    ? qty is >= 1 and <= 1968 && bc == (qty + 7) / 8
+                    : qty is >= 1 and <= 123 && bc == qty * 2;
+                if (!validMultiHeader)
+                {
+                    buffer.RemoveAt(0);
+                    continue;
+                }
+                expectedLength = 9 + bc;
+            }
+            else
+            {
+                expectedLength = 0;
+                if (buffer.Count >= 4 && Crc16.Verify(buffer.GetRange(0, 4).ToArray()))
+                    expectedLength = 4;
+                else if (buffer.Count >= 8 && Crc16.Verify(buffer.GetRange(0, 8).ToArray()))
+                    expectedLength = 8;
 
-            if (expectedLength == 0 || buffer.Count < expectedLength) return false;
+                if (expectedLength == 0)
+                {
+                    if (buffer.Count >= 8)
+                    {
+                        buffer.RemoveAt(0);
+                        continue;
+                    }
+                    return false;
+                }
+            }
+
+            if (buffer.Count < expectedLength) return false;
             var candidate = buffer.GetRange(0, expectedLength).ToArray();
             if (!Crc16.Verify(candidate))
             {
@@ -521,7 +617,10 @@ public sealed class ModbusServerService : IDisposable
         {
             byte unitId = bytes[0];
             var pdu = bytes.AsSpan(1, bytes.Length - 3);
-            var responsePdu = ProcessRequest(unitId, pdu);
+            var responsePdu = ProcessRequest(unitId, pdu, out bool suppressReply);
+            if (suppressReply || responsePdu.Length == 0)
+                return null;
+
             var body = new byte[1 + responsePdu.Length];
             body[0] = unitId;
             Array.Copy(responsePdu, 0, body, 1, responsePdu.Length);
@@ -543,7 +642,10 @@ public sealed class ModbusServerService : IDisposable
                 {
                     byte unitId = raw[0];
                     var pdu = raw.AsSpan(1, raw.Length - 2);
-                    var responsePdu = ProcessRequest(unitId, pdu);
+                    var responsePdu = ProcessRequest(unitId, pdu, out bool suppressReply);
+                    if (suppressReply || responsePdu.Length == 0)
+                        return null;
+
                     var body = new byte[1 + responsePdu.Length];
                     body[0] = unitId;
                     Array.Copy(responsePdu, 0, body, 1, responsePdu.Length);
@@ -558,14 +660,26 @@ public sealed class ModbusServerService : IDisposable
         return null;
     }
 
-    public byte[] ProcessRequest(byte unitId, ReadOnlySpan<byte> request)
+    public byte[] ProcessRequest(byte unitId, ReadOnlySpan<byte> request) =>
+        ProcessRequest(unitId, request, out _);
+
+    public byte[] ProcessRequest(byte unitId, ReadOnlySpan<byte> request, out bool suppressReply)
     {
+        suppressReply = false;
         if (request.Length < 1)
             return new byte[] { 0x80, 0x03 };
 
         byte fn = request[0];
-        if (unitId != Station)
+        bool isBroadcast = unitId == 0;
+        if (!isBroadcast && unitId != Station)
             return new byte[] { (byte)(fn | 0x80), 0x0B };
+
+        if (isBroadcast)
+        {
+            suppressReply = true;
+            if (fn is not (5 or 6 or 15 or 16))
+                return Array.Empty<byte>();
+        }
 
         bool mutated = false;
         byte[] result;
@@ -611,14 +725,16 @@ public sealed class ModbusServerService : IDisposable
             }
             catch (ModbusErrorCodeException ex)
             {
-                result = new byte[] { (byte)(fn | 0x80), ex.Code };
+                result = isBroadcast
+                    ? Array.Empty<byte>()
+                    : new byte[] { (byte)(fn | 0x80), ex.Code };
             }
         }
 
         if (mutated)
             RegistersMutated?.Invoke(this, EventArgs.Empty);
 
-        return result;
+        return isBroadcast ? Array.Empty<byte>() : result;
     }
 
     private static byte[] ReadBitsLocked(byte fn, ReadOnlySpan<byte> request, byte[] source)

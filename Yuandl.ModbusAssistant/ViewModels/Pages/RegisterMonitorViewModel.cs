@@ -74,7 +74,7 @@ public sealed class MonitorPollingGroup : ObservableObject
     public DateTime NextPollAt { get; set; }
 }
 
-public sealed class RegisterMonitorViewModel : ObservableObject
+public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
 {
     private static readonly string[] ChannelPalette =
     {
@@ -92,6 +92,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
     private readonly Dictionary<string, List<RegisterMonitorRow>> _latestRowsByGroup = new();
     private bool _isPollingTick;
     private bool _isLoadingGroup;
+    private bool _isInitializing;
     private const int SampleCapacity = 600;
 
     public RegisterMonitorViewModel(CommunicationService comm, ModbusServerService server, SettingsViewModel settings, PersistenceService persistence)
@@ -117,7 +118,18 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         RemovePollingGroupCommand = new RelayCommand(RemoveSelectedPollingGroup, () => SelectedPollingGroup != null);
         AddPollingDataCommand = new RelayCommand(AddPollingData, () => SelectedPollingGroup != null);
         RemovePollingDataCommand = new RelayCommand(RemovePollingData);
-        LoadPollingConfiguration();
+        _isInitializing = true;
+        bool seededDefault = false;
+        try
+        {
+            seededDefault = LoadPollingConfiguration();
+        }
+        finally
+        {
+            _isInitializing = false;
+        }
+        if (seededDefault)
+            SavePollingConfiguration();
         ToggleFreezeCommand = new RelayCommand(() =>
         {
             IsFrozen = !IsFrozen;
@@ -378,7 +390,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         IntervalMs = IntervalMs
     };
 
-    private void LoadPollingConfiguration()
+    private bool LoadPollingConfiguration()
     {
         var config = _persistence.LoadMonitorConfiguration();
         foreach (var note in config.ChannelNotes)
@@ -430,8 +442,9 @@ public sealed class RegisterMonitorViewModel : ObservableObject
             PollingGroups.Add(initialGroup);
             SelectedPollingGroup = initialGroup;
             AddPollingData();
-            SavePollingConfiguration();
+            return true;
         }
+        return false;
     }
 
     private void AttachPollingGroup(MonitorPollingGroup group)
@@ -456,6 +469,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
 
     private void SavePollingConfiguration()
     {
+        if (_isInitializing) return;
         _persistence.SaveMonitorConfiguration(new MonitorConfiguration
         {
             SelectedGroupId = SelectedPollingGroup?.Id,
@@ -641,12 +655,6 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         var ch = ScopeChannels.FirstOrDefault(c => c.Id == channelId);
         if (ch != null) ch.Enabled = next;
 
-        // Refresh collection item binding cleanly
-        int rowIdx = row != null ? Rows.IndexOf(row) : -1;
-        if (rowIdx >= 0) Rows[rowIdx] = row!;
-        int chIdx = ch != null ? ScopeChannels.IndexOf(ch) : -1;
-        if (chIdx >= 0) ScopeChannels[chIdx] = ch!;
-
         ScopeUpdated?.Invoke(this, EventArgs.Empty);
     }
 
@@ -657,11 +665,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         var ch = ScopeChannels.FirstOrDefault(c => c.Id == channelId);
         var row = Rows.FirstOrDefault(r => r.ChannelId == channelId);
         if (ch != null && row != null)
-        {
             ch.Label = string.IsNullOrWhiteSpace(note) ? row.Label : $"{row.Label} ({note})";
-            int idx = ScopeChannels.IndexOf(ch);
-            if (idx >= 0) ScopeChannels[idx] = ch;
-        }
     }
 
     private async Task OnTimerTickAsync(bool forceSingle = false)
@@ -978,5 +982,10 @@ public sealed class RegisterMonitorViewModel : ObservableObject
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher == null || dispatcher.CheckAccess()) action();
         else dispatcher.Invoke(action);
+    }
+
+    public void Dispose()
+    {
+        StopMonitoring();
     }
 }

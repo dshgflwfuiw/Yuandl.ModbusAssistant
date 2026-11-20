@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;
 using Yuandl.ModbusAssistant.Models;
@@ -8,7 +11,7 @@ using Yuandl.ModbusAssistant.Services;
 
 namespace Yuandl.ModbusAssistant.ViewModels.Pages;
 
-public sealed class RawDebugViewModel : ObservableObject
+public sealed class RawDebugViewModel : ObservableObject, IDisposable
 {
     private readonly CommunicationService _comm;
     private readonly DispatcherTimer _loopTimer;
@@ -68,6 +71,7 @@ public sealed class RawDebugViewModel : ObservableObject
             OnPropertyChanged(nameof(CountersText));
         });
         ClearHistoryCommand = new RelayCommand(() => SendHistory.Clear());
+        ExportLogCommand = new RelayCommand(ExportLog);
     }
 
     public IReadOnlyList<DataEncoding> Encodings { get; } = Enum.GetValues<DataEncoding>();
@@ -100,6 +104,9 @@ public sealed class RawDebugViewModel : ObservableObject
 
     private bool _isPauseReceive;
     public bool IsPauseReceive { get => _isPauseReceive; set => SetProperty(ref _isPauseReceive, value); }
+
+    private bool _autoScroll = true;
+    public bool AutoScroll { get => _autoScroll; set => SetProperty(ref _autoScroll, value); }
 
     private bool _isLoopSend;
     public bool IsLoopSend
@@ -155,6 +162,43 @@ public sealed class RawDebugViewModel : ObservableObject
     public AsyncRelayCommand SendCommand { get; }
     public RelayCommand ClearCommand { get; }
     public RelayCommand ClearHistoryCommand { get; }
+    public RelayCommand ExportLogCommand { get; }
+
+    private void ExportLog()
+    {
+        if (Messages.Count == 0)
+        {
+            ErrorText = "暂无可导出的收发记录";
+            return;
+        }
+
+        var dlg = new SaveFileDialog
+        {
+            Filter = "CSV 文件 (*.csv)|*.csv|文本日志 (*.txt)|*.txt",
+            FileName = $"raw-traffic-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        bool isTxt = Path.GetExtension(dlg.FileName).Equals(".txt", StringComparison.OrdinalIgnoreCase);
+        var sb = new StringBuilder();
+        if (isTxt)
+        {
+            foreach (var m in Messages.Reverse())
+                sb.AppendLine($"[{m.Timestamp}] [{m.Direction}] ({m.ByteLength} B) {m.SessionLabel} {m.Content}");
+        }
+        else
+        {
+            sb.AppendLine("Timestamp,Direction,ByteLength,Session,Content");
+            foreach (var m in Messages.Reverse())
+            {
+                string escaped = (m.Content ?? string.Empty).Replace("\"", "\"\"");
+                string session = (m.SessionLabel ?? string.Empty).Replace("\"", "\"\"");
+                sb.AppendLine($"{m.Timestamp},{m.Direction},{m.ByteLength},\"{session}\",\"{escaped}\"");
+            }
+        }
+        File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        ErrorText = string.Empty;
+    }
 
     private void ReDecodeAllMessages()
     {
@@ -224,5 +268,10 @@ public sealed class RawDebugViewModel : ObservableObject
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher == null || dispatcher.CheckAccess()) action();
         else dispatcher.Invoke(action);
+    }
+
+    public void Dispose()
+    {
+        _loopTimer.Stop();
     }
 }

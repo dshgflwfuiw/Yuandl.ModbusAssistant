@@ -298,6 +298,9 @@ class ModbusTcpServerService {
       const unitId = bytes[0];
       const pdu = bytes.subarray(1, bytes.length - 2);
       const responsePdu = this.processRequest(unitId, pdu);
+      if (!responsePdu) {
+        return null;
+      }
       const rtuBody = new Uint8Array(1 + responsePdu.length);
       rtuBody[0] = unitId;
       rtuBody.set(responsePdu, 1);
@@ -326,6 +329,9 @@ class ModbusTcpServerService {
           const unitId = raw[0];
           const pdu = raw.subarray(1, raw.length - 1);
           const responsePdu = this.processRequest(unitId, pdu);
+          if (!responsePdu) {
+            return null;
+          }
           const respBody = new Uint8Array(1 + responsePdu.length);
           respBody[0] = unitId;
           respBody.set(responsePdu, 1);
@@ -388,6 +394,9 @@ class ModbusTcpServerService {
         const unitId = frame[6];
         const pdu = new Uint8Array(frame.subarray(7));
         const responsePdu = this.processRequest(unitId, pdu);
+        if (!responsePdu) {
+          continue;
+        }
         const response = Buffer.alloc(7 + responsePdu.length);
         frame.copy(response, 0, 0, 4);
         response.writeUInt16BE(responsePdu.length + 1, 4);
@@ -406,37 +415,56 @@ class ModbusTcpServerService {
     });
   }
 
-  processRequest(unitId: number, request: Uint8Array): Uint8Array {
+  processRequest(unitId: number, request: Uint8Array): Uint8Array | null {
     if (request.length < 1) {
       return new Uint8Array([0x80, 0x03]);
     }
     const fn = request[0];
-    if (unitId !== this.station) {
+    const isBroadcast = unitId === 0;
+    if (!isBroadcast && unitId !== this.station) {
       return new Uint8Array([fn | 0x80, 0x0b]);
     }
 
+    if (isBroadcast && fn !== 5 && fn !== 6 && fn !== 15 && fn !== 16) {
+      return null;
+    }
+
     try {
+      let result: Uint8Array;
       switch (fn) {
         case 1:
-          return this.readBits(fn, request, this.coils);
+          result = this.readBits(fn, request, this.coils);
+          break;
         case 2:
-          return this.readBits(fn, request, this.discreteInputs);
+          result = this.readBits(fn, request, this.discreteInputs);
+          break;
         case 3:
-          return this.readRegisters(fn, request, this.holdingRegisters);
+          result = this.readRegisters(fn, request, this.holdingRegisters);
+          break;
         case 4:
-          return this.readRegisters(fn, request, this.inputRegisters);
+          result = this.readRegisters(fn, request, this.inputRegisters);
+          break;
         case 5:
-          return this.writeSingleCoil(request);
+          result = this.writeSingleCoil(request);
+          break;
         case 6:
-          return this.writeSingleRegister(request);
+          result = this.writeSingleRegister(request);
+          break;
         case 15:
-          return this.writeMultipleCoils(fn, request);
+          result = this.writeMultipleCoils(fn, request);
+          break;
         case 16:
-          return this.writeMultipleRegisters(fn, request);
+          result = this.writeMultipleRegisters(fn, request);
+          break;
         default:
-          return new Uint8Array([fn | 0x80, 0x01]);
+          result = new Uint8Array([fn | 0x80, 0x01]);
+          break;
       }
+      return isBroadcast ? null : result;
     } catch (err) {
+      if (isBroadcast) {
+        return null;
+      }
       const code = err instanceof ModbusErrorCode ? err.code : 0x02;
       return new Uint8Array([fn | 0x80, code]);
     }

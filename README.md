@@ -1,33 +1,60 @@
 # Yuandl Modbus Assistant
 
-Yuandl Modbus Assistant 是一个面向工业通信调试与设备联调的工具项目，包含 **React + TypeScript Web 版**和 **C# WPF 桌面版**。可用于 Modbus 报文调试、原始数据收发、通信状态观察及 Modbus 从站仿真。
+Yuandl Modbus Assistant 是一个面向工业通信调试与设备联调的开源工具项目，包含 **C# .NET 8 WPF 桌面工作站** 与 **React + TypeScript + Express Web 版**。支持串口物理/虚拟仿真、TCP/UDP 客户端与多客户端服务端、Modbus RTU/TCP/ASCII 调试（含 `0x0F`/`0x10` 批量写入与站号 `0` 广播写入）、内置多模式 Modbus 从站（支持在线改值与 CSV 点表导入导出）、多通道实时示波器以及 RTT 报文分析。
 
-## 功能概览
+## 核心功能
 
-- **通信连接**：串口、TCP 客户端、UDP；支持 TCP 服务端及客户端会话管理。
-- **Modbus 调试**：发送 Modbus 请求并查看响应，辅助分析异常响应。
-- **无协议调试**：以原始字节、HEX 或 ASCII 形式收发数据。
-- **数据监视与报文分析**：查看通信流量、收发统计、请求响应和时延等信息。
-- **设备与配置管理**：管理设备配置，支持服务器寄存器配置导入。
-- **Modbus 从站仿真**：配置线圈、离散输入、保持寄存器和输入寄存器；Web 版内置 Modbus TCP 服务。
+- **多通道通讯连接**：支持物理串口（`System.IO.Ports`）、虚拟环回仿真串口（可显式开关回退策略）、TCP Client（含断线自动重连）、UDP、无协议 TCP Server（多客户端会话列表、按会话定向发送与强制踢线）。
+- **内置 Modbus 从站服务器**：支持 `Tcp`、`SerialRtu`、`SerialAscii`、`TcpAndSerial` 双通道模式，支持 `UnitId=0` 广播写入静默执行、TCP 主站接入会话监控与断开、在线改值（按 Enter/写入或布尔按钮即时生效）、JSON 配置与 **CSV 点表导入/导出**。
+- **Modbus 主站调试 (FC 01–10)**：覆盖 `01/02/03/04` 读取、`05/06` 单写、`0F/10` 批量写入及 `UnitId=0` 广播写；支持事务号与功能码严格帧匹配及错帧重同步。
+- **无协议收发与报文分析**：支持 HEX/ASCII 编解码、定界符追加、发送历史、定时发送互斥保护、自动滚屏开关与 **CSV / TXT 日志导出**；RTT 往返时延采用有界采样窗口（2000 条）防长期运行内存膨胀。
+- **数据监听 & 示波器**：支持多采集组轮询与从站内存实时监听、Bool 方波与 Float/Double 多字字节序（`BigEndian` / `LittleEndian` / `WordSwap` / `ByteSwap`）、边沿触发、冻结缩放及波形 CSV 导出。
+- **设备管理一键联调**：支持配置集持久化，提供「载入」与「载入并连接」按钮一键填充端点参数、默认站号/协议格式并切换至连接页。
+- **稳定性与可运维性**：原子化 JSON 配置文件写入（`.tmp` 替换防止断电损坏）、全局未处理异常捕获、按日滚动日志（`%LocalAppData%\Yuandl.ModbusAssistant\logs`，保留 14 天），设置页提供一键「打开日志目录」。
 
-> **串口实现说明：**WPF 桌面版使用系统串口；当前 Web 版的串口连接为虚拟/仿真通道，不会直接访问本机物理串口。
+> **串口实现说明：** WPF 桌面版支持系统物理串口与可控的内联虚拟环回仿真串口；Web 版串口为虚拟仿真通道，不直接访问本机物理串口。
 
 ## 项目结构
 
 ```text
 .
-├── Yuandl.ModbusAssistant.sln       # .NET/WPF 解决方案
-├── Yuandl.ModbusAssistant/          # C# WPF 桌面应用
-├── src/                              # React + TypeScript Web 前端
-├── server.ts                         # Web 版 Express 服务与通信服务
-├── package.json                     # Web 版脚本与依赖
-└── vite.config.ts                   # Vite 配置
+├── Yuandl.ModbusAssistant.sln          # .NET 8 解决方案（含主程序与单元测试项目）
+├── Yuandl.ModbusAssistant/             # C# .NET 8 WPF 桌面应用
+├── Yuandl.ModbusAssistant.Tests/       # xUnit 核心协议与从站单元测试
+├── packaging/                          # Windows 发布脚本 (publish.ps1) 与 Inno Setup 安装包配置
+├── .github/workflows/ci.yml            # 双端 GitHub Actions CI（Web Ubuntu + WPF Windows）
+├── src/                                # React + TypeScript Web 前端
+├── server.ts                           # Web 版 Express + WebSocket + 通讯后端
+├── package.json                        # Web 版脚本与依赖
+└── vite.config.ts                      # Vite 构建配置
+```
+
+## 运行与测试 WPF 桌面版
+
+环境要求：**Windows 10/11**、**.NET 8 SDK**（含 Windows Desktop 支持）。在仓库根目录执行：
+
+```powershell
+dotnet restore .\Yuandl.ModbusAssistant.sln
+dotnet build .\Yuandl.ModbusAssistant.sln --configuration Release
+dotnet test .\Yuandl.ModbusAssistant.sln --configuration Release
+dotnet run --project .\Yuandl.ModbusAssistant\Yuandl.ModbusAssistant.csproj
+```
+
+### 发布便携版与 Windows 安装包
+
+使用仓库自带脚本一键执行测试、自包含发布（`dist\win-x64`）并可选生成 Inno Setup 安装向导：
+
+```powershell
+# 发布免安装目录版
+.\packaging\publish.ps1
+
+# 发布并生成 Inno Setup 安装包（需本机已安装 Inno Setup 6）
+.\packaging\publish.ps1 -BuildInstaller
 ```
 
 ## 运行 Web 版
 
-需要安装 **Node.js**（建议使用当前 LTS 版本）和 npm。
+环境要求：**Node.js 20 LTS** 与 npm。
 
 ```bash
 npm install
@@ -39,33 +66,12 @@ npm run dev
 常用命令：
 
 ```bash
-npm run lint   # 代码检查
-npm run build  # 构建前端资源
+npm run lint   # ESLint 代码检查
+npm run build  # 构建前端生产资源
 npm start      # 以生产模式启动服务（需先执行 npm run build）
 ```
 
-默认服务端口为 `3000`。如需更改端口，请先检查并修改 `server.ts` 中的 `PORT` 常量。
-
-## 构建 WPF 桌面版
-
-需要 Windows、.NET 8 SDK（含 Windows Desktop 支持）。在仓库根目录执行：
-
-```powershell
-dotnet restore .\Yuandl.ModbusAssistant.sln
-dotnet build .\Yuandl.ModbusAssistant.sln --configuration Release
-dotnet run --project .\Yuandl.ModbusAssistant\Yuandl.ModbusAssistant.csproj
-```
-
-WPF 项目目标框架为 `net8.0-windows`，串口功能依赖 `System.IO.Ports`。
-
 ## 使用提示
 
-- 调试前请确认连接类型、主机/端口或串口参数与目标设备一致。
-- 使用内置 Modbus TCP 服务时，选择合适的监听端口和站号，并在客户端连接相应端点。
-- 多寄存器字节序中，`WordSwap` 保持每个 16 位寄存器内部字节顺序，并反转 16 位寄存器顺序；Double 的 `ABCDEFGH` 因此变为 `GHEFCDAB`。WPF 与 Web 版使用相同定义。
-- 在网络或现场设备上测试前，请确认端口和设备配置已经获得授权，并避免向生产设备发送未经验证的写入请求。
-
-## 技术栈
-
-- Web：React、TypeScript、Vite、Tailwind CSS、Express、WebSocket
-- 桌面端：C#、.NET 8、WPF
+- 多寄存器字节序中，`WordSwap` 保持每个 16 位寄存器内部字节顺序并反转 16 位寄存器顺序；`Double` 的 `ABCDEFGH` 因此变为 `GHEFCDAB`。WPF 与 Web 版使用完全一致的编解码规则。
+- 在现场 PLC 或生产设备上执行写入（特别是广播写入）前，请确认站号、寄存器地址映射及写入权限已获授权。

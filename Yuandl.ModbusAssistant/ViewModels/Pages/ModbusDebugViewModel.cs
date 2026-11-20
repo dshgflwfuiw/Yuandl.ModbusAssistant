@@ -129,7 +129,7 @@ public sealed class ModbusDebugViewModel : ObservableObject
     public bool HasBatchError { get => _hasBatchError; private set => SetProperty(ref _hasBatchError, value); }
 
     private int _timeoutMs = 1000;
-    public int TimeoutMs { get => _timeoutMs; set => SetProperty(ref _timeoutMs, value); }
+    public int TimeoutMs { get => _timeoutMs; set => SetProperty(ref _timeoutMs, Math.Clamp(value, 100, 30000)); }
 
     private string _requestPreviewHex = string.Empty;
     public string RequestPreviewHex { get => _requestPreviewHex; set => SetProperty(ref _requestPreviewHex, value); }
@@ -195,6 +195,13 @@ public sealed class ModbusDebugViewModel : ObservableObject
         ResponseHex = string.Empty;
         try
         {
+            byte fn = SelectedFunction.Code;
+            if (UnitId == 0 && fn is 1 or 2 or 3 or 4)
+            {
+                SummaryText = "参数提示：Modbus 广播地址 (站号 0) 仅支持写入功能码 (05/06/0F/10)";
+                return;
+            }
+
             ushort txId = Transport == ModbusTransport.Tcp ? _transactionId++ : (ushort)1;
             if (_transactionId == 0) _transactionId = 1;
 
@@ -202,6 +209,13 @@ public sealed class ModbusDebugViewModel : ObservableObject
             RequestPreviewHex = ByteUtils.BytesToHex(frame);
 
             var respBytes = await _comm.ExchangeModbusAsync(frame, Transport, TimeoutMs, _settings.DefaultRetryTimes);
+            if (UnitId == 0 && respBytes.Length == 0)
+            {
+                ResponseHex = "(广播请求无从站响应)";
+                SummaryText = $"已发送广播写入请求 · 站号 0 · FC 0x{fn:X2} · 起始地址 {Address}（从站按协议静默执行）";
+                return;
+            }
+
             ResponseHex = ByteUtils.BytesToHex(respBytes);
             DecodeResponseBytes(respBytes);
         }

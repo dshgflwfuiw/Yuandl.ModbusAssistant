@@ -4,6 +4,8 @@ VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Yuandl.ModbusAssistant", "Yuandl.ModbusAssistant\Yuandl.ModbusAssistant.csproj", "{B4E8A31D-6F32-4F55-9B2C-48A17E9C2011}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Yuandl.ModbusAssistant.Tests", "Yuandl.ModbusAssistant.Tests\Yuandl.ModbusAssistant.Tests.csproj", "{D91C4F28-7C8A-4A5B-9E3E-2B6E14C0A102}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,5 +16,9 @@ Global
 		{B4E8A31D-6F32-4F55-9B2C-48A17E9C2011}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B4E8A31D-6F32-4F55-9B2C-48A17E9C2011}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B4E8A31D-6F32-4F55-9B2C-48A17E9C2011}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D91C4F28-7C8A-4A5B-9E3E-2B6E14C0A102}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D91C4F28-7C8A-4A5B-9E3E-2B6E14C0A102}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D91C4F28-7C8A-4A5B-9E3E-2B6E14C0A102}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D91C4F28-7C8A-4A5B-9E3E-2B6E14C0A102}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

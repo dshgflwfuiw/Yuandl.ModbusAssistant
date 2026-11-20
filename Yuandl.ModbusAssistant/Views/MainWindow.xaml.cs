@@ -1,18 +1,50 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using Yuandl.ModbusAssistant.ViewModels;
 
 namespace Yuandl.ModbusAssistant.Views;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private bool _isNavigationExpanded = true;
+    private MainViewModel? _boundVm;
 
     public MainWindow()
     {
         InitializeComponent();
         ToggleNavigationCommand = new RelayCommand(ToggleNavigation);
+        DataContextChanged += OnDataContextChanged;
+    }
+
+    private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (_boundVm != null)
+        {
+            _boundVm.RawDebug.Messages.CollectionChanged -= OnRawMessagesChanged;
+            _boundVm.PacketAnalysis.CapturedPackets.CollectionChanged -= OnCapturedPacketsChanged;
+        }
+
+        _boundVm = e.NewValue as MainViewModel;
+        if (_boundVm != null)
+        {
+            _boundVm.RawDebug.Messages.CollectionChanged += OnRawMessagesChanged;
+            _boundVm.PacketAnalysis.CapturedPackets.CollectionChanged += OnCapturedPacketsChanged;
+        }
+    }
+
+    private void OnRawMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_boundVm?.RawDebug.AutoScroll == true && RawMessagesGrid.Items.Count > 0)
+            RawMessagesGrid.ScrollIntoView(RawMessagesGrid.Items[0]);
+    }
+
+    private void OnCapturedPacketsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (_boundVm?.PacketAnalysis.AutoScroll == true && CapturedPacketsGrid.Items.Count > 0)
+            CapturedPacketsGrid.ScrollIntoView(CapturedPacketsGrid.Items[0]);
     }
 
     public bool IsNavigationExpanded
@@ -41,7 +73,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private sealed class RelayCommand(Action execute) : ICommand
-{
+    {
         public event EventHandler? CanExecuteChanged
         {
             add { }

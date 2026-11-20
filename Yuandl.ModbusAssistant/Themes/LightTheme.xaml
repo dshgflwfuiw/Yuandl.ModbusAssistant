@@ -12,6 +12,7 @@
     <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
     <SolidColorBrush x:Key="AccentHoverBrush" Color="#1D4ED8" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#059669" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#D97706" />
     <SolidColorBrush x:Key="DangerBrush" Color="#DC2626" />
     <SolidColorBrush x:Key="StatusBarBrush" Color="#FFFFFF" />
 </ResourceDictionary>

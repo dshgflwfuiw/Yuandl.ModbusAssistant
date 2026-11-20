@@ -5,33 +5,87 @@ using Yuandl.ModbusAssistant.Core.Enums;
 
 namespace Yuandl.ModbusAssistant.Models;
 
-public sealed class SerialPortParameters
+public sealed class SerialPortParameters : INotifyPropertyChanged
 {
-    public string PortName { get; set; } = "COM1";
-    public int BaudRate { get; set; } = 9600;
-    public int DataBits { get; set; } = 8;
-    public Parity Parity { get; set; } = Parity.None;
-    public StopBits StopBits { get; set; } = StopBits.One;
-    public bool DtrEnable { get; set; } = true;
-    public bool RtsEnable { get; set; } = true;
+    private string _portName = "COM1";
+    private int _baudRate = 9600;
+    private int _dataBits = 8;
+    private Parity _parity = Parity.None;
+    private StopBits _stopBits = StopBits.One;
+    private bool _dtrEnable = true;
+    private bool _rtsEnable = true;
 
-    public SerialPortParameters Clone() => (SerialPortParameters)MemberwiseClone();
+    public string PortName { get => _portName; set => SetProperty(ref _portName, value); }
+    public int BaudRate { get => _baudRate; set => SetProperty(ref _baudRate, value); }
+    public int DataBits { get => _dataBits; set => SetProperty(ref _dataBits, value); }
+    public Parity Parity { get => _parity; set => SetProperty(ref _parity, value); }
+    public StopBits StopBits { get => _stopBits; set => SetProperty(ref _stopBits, value); }
+    public bool DtrEnable { get => _dtrEnable; set => SetProperty(ref _dtrEnable, value); }
+    public bool RtsEnable { get => _rtsEnable; set => SetProperty(ref _rtsEnable, value); }
+
+    public SerialPortParameters Clone() => new()
+    {
+        PortName = PortName,
+        BaudRate = BaudRate,
+        DataBits = DataBits,
+        Parity = Parity,
+        StopBits = StopBits,
+        DtrEnable = DtrEnable,
+        RtsEnable = RtsEnable
+    };
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
-public sealed class TcpClientParameters
+public sealed class TcpClientParameters : INotifyPropertyChanged
 {
-    public string Host { get; set; } = "127.0.0.1";
-    public int Port { get; set; } = 5020;
-    public int ConnectTimeoutMs { get; set; } = 3000;
-    public bool AutoReconnect { get; set; } = false;
-    public int ReconnectIntervalMs { get; set; } = 3000;
+    private string _host = "127.0.0.1";
+    private int _port = 5020;
+    private int _connectTimeoutMs = 3000;
+    private bool _autoReconnect;
+    private int _reconnectIntervalMs = 3000;
+
+    public string Host { get => _host; set => SetProperty(ref _host, value); }
+    public int Port { get => _port; set => SetProperty(ref _port, value); }
+    public int ConnectTimeoutMs { get => _connectTimeoutMs; set => SetProperty(ref _connectTimeoutMs, value); }
+    public bool AutoReconnect { get => _autoReconnect; set => SetProperty(ref _autoReconnect, value); }
+    public int ReconnectIntervalMs { get => _reconnectIntervalMs; set => SetProperty(ref _reconnectIntervalMs, value); }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
-public sealed class UdpParameters
+public sealed class UdpParameters : INotifyPropertyChanged
 {
-    public string RemoteHost { get; set; } = "127.0.0.1";
-    public int RemotePort { get; set; } = 502;
-    public int LocalPort { get; set; } = 0;
+    private string _remoteHost = "127.0.0.1";
+    private int _remotePort = 502;
+    private int _localPort;
+
+    public string RemoteHost { get => _remoteHost; set => SetProperty(ref _remoteHost, value); }
+    public int RemotePort { get => _remotePort; set => SetProperty(ref _remotePort, value); }
+    public int LocalPort { get => _localPort; set => SetProperty(ref _localPort, value); }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public sealed class TcpServerParameters : INotifyPropertyChanged

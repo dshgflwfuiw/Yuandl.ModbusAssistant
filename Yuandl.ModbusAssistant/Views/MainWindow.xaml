@@ -199,7 +199,8 @@
                                         <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding Serial.StopBits}" Padding="6,4" />
                                     </StackPanel>
                                     <CheckBox Content="DTR" IsChecked="{Binding Serial.DtrEnable}" VerticalAlignment="Bottom" Margin="4,0,10,12" />
-                                    <CheckBox Content="RTS" IsChecked="{Binding Serial.RtsEnable}" VerticalAlignment="Bottom" Margin="0,0,0,12" />
+                                    <CheckBox Content="RTS" IsChecked="{Binding Serial.RtsEnable}" VerticalAlignment="Bottom" Margin="0,0,10,12" />
+                                    <CheckBox Content="无物理串口时允许虚拟环回" IsChecked="{Binding AllowClientVirtualLoopback}" VerticalAlignment="Bottom" Margin="0,0,0,12" ToolTip="物理串口不可用时，允许直接对接内置仿真串口从站" />
                                 </WrapPanel>
 
                                 <!-- TCP Client Parameters -->
@@ -273,7 +274,8 @@
                                     </DataGrid>
                                 </StackPanel>
 
-                                <TextBlock Text="{Binding ConnectionError}" Foreground="{DynamicResource DangerBrush}" Margin="0,6,0,0" />
+                                <TextBlock Text="{Binding ChannelModeNotice}" Foreground="{DynamicResource WarningBrush}" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding ConnectionError}" Foreground="{DynamicResource DangerBrush}" Margin="0,4,0,0" />
                             </StackPanel>
                         </Border>
 
@@ -282,6 +284,8 @@
                             <StackPanel>
                                 <DockPanel Margin="0,0,0,10">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <Button Style="{StaticResource SecondaryButton}" Content="导入 CSV" Command="{Binding ImportCsvCommand}" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource SecondaryButton}" Content="导出 CSV" Command="{Binding ExportCsvCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导入 JSON" Command="{Binding ImportConfigCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="导出 JSON" Command="{Binding ExportConfigCommand}" Margin="0,0,6,0" />
                                         <Button Style="{StaticResource SecondaryButton}" Content="重置初始值" Command="{Binding ResetRegistersCommand}" />
@@ -323,6 +327,7 @@
                                             <TextBlock Style="{StaticResource FieldLabel}" Text="停止位" />
                                             <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding StopBitsOptions}" SelectedItem="{Binding ServerSerial.StopBits}" Padding="6,4" />
                                         </StackPanel>
+                                        <CheckBox Content="无物理口时仿真" IsChecked="{Binding AllowServerVirtualFallback}" VerticalAlignment="Bottom" Margin="0,0,10,12" ToolTip="串口无法打开时自动退回内联虚拟仿真串口" />
                                     </WrapPanel>
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">
                                         <Button Style="{StaticResource PrimaryButton}" Content="启动服务器" Command="{Binding StartServerCommand}" Margin="0,0,8,0" />
@@ -330,7 +335,16 @@
                                     </StackPanel>
                                 </WrapPanel>
 
-                                <TextBlock Text="{Binding ServerStatusText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <DockPanel Margin="0,0,0,10">
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Visibility="{Binding ServerUsesTcp, Converter={StaticResource BoolToVis}}"
+                                               Text="{Binding ServerLocalIpAddressesText, StringFormat='本机监听: {0}'}"
+                                               FontFamily="Consolas"
+                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               VerticalAlignment="Center"
+                                               Margin="12,0,0,0" />
+                                    <TextBlock Text="{Binding ServerStatusText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </DockPanel>
 
                                 <!-- Add Register Definition Row -->
                                 <WrapPanel Margin="0,0,0,10">
@@ -419,6 +433,30 @@
                                 </DataGrid>
 
                                 <TextBlock Text="{Binding ServerBanner}" Foreground="{DynamicResource SuccessBrush}" Margin="0,8,0,0" />
+
+                                <StackPanel Visibility="{Binding IsModbusServerRunning, Converter={StaticResource BoolToVis}}" Margin="0,10,0,0">
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="{Binding ModbusServerClients.Count, StringFormat='已接入 Modbus TCP 主站会话 ({0})'}" />
+                                    <DataGrid ItemsSource="{Binding ModbusServerClients}" AutoGenerateColumns="False" IsReadOnly="True" Height="96" HeadersVisibility="Column">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="会话ID" Binding="{Binding SessionId}" Width="75" />
+                                            <DataGridTextColumn Header="远端主机" Binding="{Binding RemoteAddress}" Width="140" />
+                                            <DataGridTextColumn Header="端口" Binding="{Binding RemotePort}" Width="80" />
+                                            <DataGridTextColumn Header="接入时间" Binding="{Binding ConnectedAtText}" Width="90" />
+                                            <DataGridTextColumn Header="已收 (B)" Binding="{Binding BytesReceived}" Width="90" />
+                                            <DataGridTextColumn Header="已发 (B)" Binding="{Binding BytesSent}" Width="90" />
+                                            <DataGridTemplateColumn Header="操作" Width="80">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <Button Content="断开"
+                                                                Padding="6,2"
+                                                                Command="{Binding DataContext.KickModbusServerClientCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -580,6 +618,7 @@
                                     </DockPanel>
                                 </StackPanel>
                                 <CheckBox Content="暂停接收" IsChecked="{Binding IsPauseReceive}" VerticalAlignment="Bottom" Margin="4,0,12,12" />
+                                <CheckBox Content="自动滚屏" IsChecked="{Binding AutoScroll}" VerticalAlignment="Bottom" Margin="0,0,12,12" />
                                 <CheckBox Content="定时发送" IsChecked="{Binding IsLoopSend}" VerticalAlignment="Bottom" Margin="0,0,6,12" />
                                 <StackPanel Width="75" Margin="0,0,0,8">
                                     <TextBlock Style="{StaticResource FieldLabel}" Text="间隔(ms)" />
@@ -589,6 +628,7 @@
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
                                     <Button Style="{StaticResource PrimaryButton}" Content="发送数据" Command="{Binding SendCommand}" Margin="0,0,8,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="导出日志" Command="{Binding ExportLogCommand}" Margin="0,0,8,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="清空记录" Command="{Binding ClearCommand}" />
                                 </StackPanel>
                                 <TextBox Text="{Binding PayloadText, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" Padding="8,6" />
@@ -600,7 +640,7 @@
                     <Border Style="{StaticResource CardBorder}" Grid.Row="1" Margin="0">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionTitle}" Text="实时收发历史" />
-                            <DataGrid ItemsSource="{Binding Messages}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
+                            <DataGrid x:Name="RawMessagesGrid" ItemsSource="{Binding Messages}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="时间" Binding="{Binding Timestamp}" Width="105" />
                                     <DataGridTextColumn Header="方向" Binding="{Binding Direction}" Width="65" />
@@ -879,8 +919,10 @@
                     <Border Style="{StaticResource CardBorder}" Grid.Row="0">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                <CheckBox Content="实时捕获收发流量" IsChecked="{Binding IsCapturing}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding CaptureModes}" SelectedItem="{Binding CaptureTransport}" Width="95" Margin="0,0,10,0" Padding="5,4" />
+                                <CheckBox Content="实时捕获" IsChecked="{Binding IsCapturing}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <CheckBox Content="自动滚屏" IsChecked="{Binding AutoScroll}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding CaptureModes}" SelectedItem="{Binding CaptureTransport}" Width="95" Margin="0,0,8,0" Padding="5,4" />
+                                <Button Style="{StaticResource SecondaryButton}" Content="导出报文" Command="{Binding ExportLogCommand}" Margin="0,0,8,0" />
                                 <Button Style="{StaticResource SecondaryButton}" Content="清空统计" Command="{Binding ClearCommand}" />
                             </StackPanel>
                             <StackPanel>
@@ -896,7 +938,7 @@
                     </Border>
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="1">
-                        <DataGrid ItemsSource="{Binding CapturedPackets}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
+                        <DataGrid x:Name="CapturedPacketsGrid" ItemsSource="{Binding CapturedPackets}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="时间" Binding="{Binding Timestamp}" Width="105" />
                                 <DataGridTextColumn Header="方向" Binding="{Binding Direction}" Width="60" />
@@ -958,6 +1000,7 @@
                                 </StackPanel>
                                 <Button Style="{StaticResource PrimaryButton}" Content="+ 保存设备方案" Command="{Binding AddProfileCommand}" VerticalAlignment="Bottom" Margin="0,0,0,6" />
                             </WrapPanel>
+                            <TextBlock Text="{Binding StatusBanner}" Foreground="{DynamicResource AccentBrush}" Margin="0,6,0,0" />
                         </StackPanel>
                     </Border>
 
@@ -966,16 +1009,29 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="100" />
                                 <DataGridTextColumn Header="设备名称" Binding="{Binding Name}" Width="180" />
-                                <DataGridTextColumn Header="协议" Binding="{Binding Protocol}" Width="140" />
+                                <DataGridTextColumn Header="协议" Binding="{Binding Protocol}" Width="130" />
                                 <DataGridTextColumn Header="端点" Binding="{Binding Endpoint}" Width="*" />
-                                <DataGridTextColumn Header="站号" Binding="{Binding StationId}" Width="80" />
-                                <DataGridTemplateColumn Header="操作" Width="90">
+                                <DataGridTextColumn Header="站号" Binding="{Binding StationId}" Width="75" />
+                                <DataGridTemplateColumn Header="操作" Width="210">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
-                                            <Button Content="删除"
-                                                    Padding="6,2"
-                                                    Command="{Binding DataContext.DeleteProfileCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                    CommandParameter="{Binding}" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="载入"
+                                                        Padding="6,2"
+                                                        Margin="0,0,4,0"
+                                                        Command="{Binding DataContext.LoadProfileCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="载入并连接"
+                                                        Style="{StaticResource PrimaryButton}"
+                                                        Padding="6,2"
+                                                        Margin="0,0,4,0"
+                                                        Command="{Binding DataContext.LoadAndConnectCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="删除"
+                                                        Padding="6,2"
+                                                        Command="{Binding DataContext.DeleteProfileCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
@@ -1073,12 +1129,16 @@
                                     <TextBlock Text="M" FontSize="20" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="Yuandl Modbus Assistant" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
-                                    <TextBlock Text="Yuandl Modbus Assistant v1.0.0
-
-工业通讯与协议分析套件（支持串口仿真、TCP/UDP 通讯、Modbus 帧编解码与内置 Modbus TCP 服务器）" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                    <TextBlock Text="Yuandl Modbus Assistant v1.1.0" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    <TextBlock Text="工业通讯与协议分析套件（支持串口物理/仿真、TCP/UDP 通讯、Modbus 帧编解码、示波器采集与内置 Modbus 从站服务器）" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
+                                    <TextBlock Text="{Binding LogDirectory, StringFormat='运行日志目录: {0}'}" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="0,3,0,0" />
                                 </StackPanel>
-                                <TextBlock Text="串口 · TCP/UDP · Modbus" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                <Button DockPanel.Dock="Right"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Content="打开日志目录"
+                                        Command="{Binding OpenLogFolderCommand}"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Right" />
                             </DockPanel>
                         </Border>
                     </StackPanel>

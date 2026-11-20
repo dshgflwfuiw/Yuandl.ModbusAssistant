@@ -38,18 +38,15 @@ public sealed class PersistenceService
                 return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             }
         }
-        catch { /* fallback to defaults */ }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"读取系统设置失败 ({SettingsPath})", ex);
+        }
         return new AppSettings();
     }
 
-    public void SaveSettings(AppSettings settings)
-    {
-        try
-        {
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
-        }
-        catch { /* ignore IO failure */ }
-    }
+    public void SaveSettings(AppSettings settings) =>
+        WriteFileAtomic(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
 
     public List<DeviceProfile> LoadProfiles()
     {
@@ -62,7 +59,10 @@ public sealed class PersistenceService
                 if (list != null) return list;
             }
         }
-        catch { /* fallback */ }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"读取设备方案失败 ({ProfilesPath})", ex);
+        }
 
         return new List<DeviceProfile>
         {
@@ -71,14 +71,8 @@ public sealed class PersistenceService
         };
     }
 
-    public void SaveProfiles(IEnumerable<DeviceProfile> profiles)
-    {
-        try
-        {
-            File.WriteAllText(ProfilesPath, JsonSerializer.Serialize(profiles.ToList(), JsonOptions));
-        }
-        catch { /* ignore IO failure */ }
-    }
+    public void SaveProfiles(IEnumerable<DeviceProfile> profiles) =>
+        WriteFileAtomic(ProfilesPath, JsonSerializer.Serialize(profiles.ToList(), JsonOptions));
 
     public ModbusServerConfiguration LoadServerConfig()
     {
@@ -91,7 +85,10 @@ public sealed class PersistenceService
                 if (cfg != null) return cfg;
             }
         }
-        catch { /* fallback */ }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"读取从站服务器配置失败 ({ServerConfigPath})", ex);
+        }
 
         return new ModbusServerConfiguration
         {
@@ -106,14 +103,8 @@ public sealed class PersistenceService
         };
     }
 
-    public void SaveServerConfig(ModbusServerConfiguration config)
-    {
-        try
-        {
-            File.WriteAllText(ServerConfigPath, JsonSerializer.Serialize(config, JsonOptions));
-        }
-        catch { /* ignore IO failure */ }
-    }
+    public void SaveServerConfig(ModbusServerConfiguration config) =>
+        WriteFileAtomic(ServerConfigPath, JsonSerializer.Serialize(config, JsonOptions));
 
     public MonitorConfiguration LoadMonitorConfiguration()
     {
@@ -125,18 +116,31 @@ public sealed class PersistenceService
                 return JsonSerializer.Deserialize<MonitorConfiguration>(json, JsonOptions) ?? new MonitorConfiguration();
             }
         }
-        catch { /* fallback to empty monitor configuration */ }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"读取监听采集组配置失败 ({MonitorConfigPath})", ex);
+        }
 
         return new MonitorConfiguration();
     }
 
-    public void SaveMonitorConfiguration(MonitorConfiguration config)
+    public void SaveMonitorConfiguration(MonitorConfiguration config) =>
+        WriteFileAtomic(MonitorConfigPath, JsonSerializer.Serialize(config, JsonOptions));
+
+    private static void WriteFileAtomic(string targetPath, string content)
     {
+        string tempPath = targetPath + ".tmp";
         try
         {
-            File.WriteAllText(MonitorConfigPath, JsonSerializer.Serialize(config, JsonOptions));
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            File.WriteAllText(tempPath, content);
+            File.Move(tempPath, targetPath, overwrite: true);
         }
-        catch { /* ignore IO failure */ }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"写入配置文件失败 ({targetPath})", ex);
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+        }
     }
 
     public static string SerializeServerConfig(ModbusServerConfiguration config) =>

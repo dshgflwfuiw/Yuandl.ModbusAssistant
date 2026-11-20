@@ -1,5 +1,6 @@
 using System.Windows;
 using Yuandl.ModbusAssistant.Core.Enums;
+using Yuandl.ModbusAssistant.Models;
 using Yuandl.ModbusAssistant.Services;
 using Yuandl.ModbusAssistant.ViewModels.Pages;
 
@@ -31,7 +32,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RawDebug = new RawDebugViewModel(CommunicationService);
         RegisterMonitor = new RegisterMonitorViewModel(CommunicationService, ModbusServerService, Settings, _persistence);
         PacketAnalysis = new PacketAnalysisViewModel(CommunicationService);
-        DeviceManagement = new DeviceManagementViewModel(_persistence);
+        DeviceManagement = new DeviceManagementViewModel(_persistence)
+        {
+            OnApplyProfile = ApplyDeviceProfileAsync
+        };
 
         CommunicationService.StateChanged += (_, _) => RunOnUi(UpdateStatusBar);
         CommunicationService.TrafficCaptured += (_, _) => RunOnUi(UpdateStatusBar);
@@ -56,11 +60,34 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _lastAlert = string.Empty;
     public string LastAlert { get => _lastAlert; private set => SetProperty(ref _lastAlert, value); }
 
+    private async Task ApplyDeviceProfileAsync(DeviceProfile profile, bool autoConnect)
+    {
+        ModbusDebug.UnitId = (byte)Math.Clamp(profile.StationId, 1, 247);
+        if (profile.Protocol.Contains("RTU", StringComparison.OrdinalIgnoreCase))
+            ModbusDebug.Transport = ModbusTransport.Rtu;
+        else if (profile.Protocol.Contains("ASCII", StringComparison.OrdinalIgnoreCase))
+            ModbusDebug.Transport = ModbusTransport.Ascii;
+        else
+            ModbusDebug.Transport = ModbusTransport.Tcp;
+
+        await Connection.ApplyDeviceProfileAsync(profile, autoConnect);
+        SelectedTabIndex = 0;
+    }
+
     private void UpdateStatusBar()
     {
         var state = CommunicationService.State;
-        var type = CommunicationService.ActiveType?.ToString() ?? "无通道";
-        StatusSummary = state == ChannelState.Connected ? $"已连接 ({type})" : $"状态: {state}";
+        if (state == ChannelState.Connected)
+        {
+            string label = !string.IsNullOrWhiteSpace(CommunicationService.ActiveEndpointLabel)
+                ? CommunicationService.ActiveEndpointLabel
+                : CommunicationService.ActiveType?.ToString() ?? "已连接";
+            StatusSummary = $"已连接 ({label})";
+        }
+        else
+        {
+            StatusSummary = $"状态: {state}";
+        }
 
         var stats = CommunicationService.Statistics;
         TrafficSummary = $"TX: {stats.BytesSent} B ({stats.PacketsSent}帧) | RX: {stats.BytesReceived} B ({stats.PacketsReceived}帧) | ERR: {stats.ErrorsCount}";
@@ -76,7 +103,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        RegisterMonitor.StopMonitoring();
+        RawDebug.Dispose();
+        RegisterMonitor.Dispose();
         CommunicationService.Dispose();
         ModbusServerService.Dispose();
     }
