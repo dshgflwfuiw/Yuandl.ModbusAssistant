@@ -606,13 +606,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [refreshState, handleTrafficEvent]);
 
   const updateSettings = useCallback(async (next: AppSettings) => {
-    setSettings(next);
-    writeStorage(STORAGE_KEYS.settings, next);
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next),
-    });
+    const normalized: AppSettings = {
+      theme: next.theme === 'dark' ? 'dark' : 'light',
+      defaultTimeoutMs: Number.isFinite(Number(next.defaultTimeoutMs))
+        ? Math.min(30000, Math.max(100, Math.floor(Number(next.defaultTimeoutMs))))
+        : 1000,
+      defaultRetryTimes: Number.isFinite(Number(next.defaultRetryTimes))
+        ? Math.min(10, Math.max(0, Math.floor(Number(next.defaultRetryTimes))))
+        : 2,
+    };
+    setSettings(normalized);
+    writeStorage(STORAGE_KEYS.settings, normalized);
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(normalized),
+      });
+    } catch {
+      // keep localStorage persisted even if offline
+    }
   }, []);
 
   const toggleTheme = useCallback(() => {

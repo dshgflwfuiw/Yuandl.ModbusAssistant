@@ -25,4 +25,8 @@
     <ProjectReference Include="..\Yuandl.ModbusAssistant\Yuandl.ModbusAssistant.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\test-vectors\modbus-vectors.json" Link="test-vectors\modbus-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

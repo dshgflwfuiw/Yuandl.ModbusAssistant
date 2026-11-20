@@ -46,28 +46,64 @@ export const SettingsPage: React.FC = () => {
       {/* 默认通讯控制 */}
       <div className="space-y-2.5">
         <h2 className="text-sm font-semibold">默认通讯控制</h2>
-        <div className="fluent-card p-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Sliders className="w-5 h-5 text-[var(--text-secondary)] shrink-0" />
-            <div>
-              <div className="text-sm font-medium">通讯默认超时 (ms)</div>
-              <div className="text-xs text-[var(--text-secondary)]">
-                请求发送后等待从站或对端返回的最长等待毫秒数
+        <div className="fluent-card divide-y divide-[var(--border-subtle)]">
+          <div className="p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Sliders className="w-5 h-5 text-[var(--text-secondary)] shrink-0" />
+              <div>
+                <div className="text-sm font-medium">通讯默认超时 (ms)</div>
+                <div className="text-xs text-[var(--text-secondary)]">
+                  请求发送后等待从站或对端返回的最长等待毫秒数 (100 ~ 30000)
+                </div>
               </div>
             </div>
+            <input
+              type="number"
+              min={100}
+              max={30000}
+              value={settings.defaultTimeoutMs}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                const clamped = Number.isFinite(raw)
+                  ? Math.min(30000, Math.max(100, Math.floor(raw)))
+                  : 1000;
+                void updateSettings({
+                  ...settings,
+                  defaultTimeoutMs: clamped,
+                });
+              }}
+              className="fluent-input w-32 text-center"
+            />
           </div>
-          <input
-            type="number"
-            min={100}
-            value={settings.defaultTimeoutMs}
-            onChange={(e) =>
-              void updateSettings({
-                ...settings,
-                defaultTimeoutMs: Number(e.target.value),
-              })
-            }
-            className="fluent-input w-32 text-center"
-          />
+
+          <div className="p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Sliders className="w-5 h-5 text-[var(--text-secondary)] shrink-0" />
+              <div>
+                <div className="text-sm font-medium">失败重试次数</div>
+                <div className="text-xs text-[var(--text-secondary)]">
+                  请求超时或无响应后的自动重试次数 (0 ~ 10，广播写不重试)
+                </div>
+              </div>
+            </div>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={settings.defaultRetryTimes}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                const clamped = Number.isFinite(raw)
+                  ? Math.min(10, Math.max(0, Math.floor(raw)))
+                  : 2;
+                void updateSettings({
+                  ...settings,
+                  defaultRetryTimes: clamped,
+                });
+              }}
+              className="fluent-input w-32 text-center"
+            />
+          </div>
         </div>
       </div>
 
@@ -75,9 +111,9 @@ export const SettingsPage: React.FC = () => {
       <div className="space-y-2.5">
         <h2 className="text-sm font-semibold">软件信息</h2>
         <div className="fluent-card p-4 space-y-1">
-          <div className="text-sm font-semibold">Yuandl Modbus Assistant v1.0.0</div>
+          <div className="text-sm font-semibold">Yuandl Modbus Assistant v1.1.0</div>
           <div className="text-xs text-[var(--text-secondary)]">
-            工业通讯与协议分析套件（支持串口仿真、TCP/UDP 通讯、Modbus 帧编解码与内置 Modbus TCP 服务器）
+            工业通讯与协议分析套件（支持串口仿真、TCP/UDP 通讯、Modbus 帧编解码与内置 Modbus TCP/串口服务器）
           </div>
         </div>
       </div>

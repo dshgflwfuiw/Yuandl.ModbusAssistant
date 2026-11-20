@@ -170,6 +170,8 @@ export const RegisterMonitorPage: React.FC = () => {
         body: JSON.stringify({
           requestHex: ByteUtils.bytesToHex(request),
           timeoutMs: settings.defaultTimeoutMs,
+          retries: settings.defaultRetryTimes,
+          transport,
         }),
       });
       const data = await res.json();
@@ -276,6 +278,7 @@ export const RegisterMonitorPage: React.FC = () => {
     selectedByteOrder,
     scale,
     settings.defaultTimeoutMs,
+    settings.defaultRetryTimes,
     appendSample,
   ]);
 

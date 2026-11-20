@@ -183,8 +183,8 @@ const MainShell: React.FC = () => {
         </main>
       </div>
 
-      {/* 底部工业通讯状态监视栏 (34px) */}
-      <footer className="h-[34px] shrink-0 px-4 flex items-center gap-4 text-xs border-t border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
+      {/* 底部工业通讯状态监视栏 */}
+      <footer className="min-h-[34px] shrink-0 px-4 py-1 flex items-center gap-3 sm:gap-4 text-xs border-t border-[var(--border-subtle)] bg-[var(--surface-secondary)] overflow-hidden">
         {/* 1. 连接状态指示灯与文字 */}
         <div className="flex items-center gap-2 shrink-0">
           <span

@@ -80,9 +80,14 @@ public abstract class ChannelBase : IChannel
         ErrorOccurred?.Invoke(this, message);
     }
 
+    private int _disposed;
+
     public virtual void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
         _ = CloseAsync();
+        GC.SuppressFinalize(this);
     }
 }
 
@@ -105,10 +110,17 @@ public sealed class SerialPortChannel : ChannelBase
         if (State == ChannelState.Connected)
             return Task.CompletedTask;
 
+        if (string.IsNullOrWhiteSpace(_parameters.PortName))
+            throw new ArgumentException("串口名称不能为空", nameof(_parameters.PortName));
+        if (_parameters.BaudRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.BaudRate), "波特率必须大于 0");
+        if (_parameters.DataBits is < 5 or > 8)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.DataBits), "数据位必须在 5 至 8 之间");
+
         State = ChannelState.Connecting;
         try
         {
-            var sp = new SerialPort(_parameters.PortName, _parameters.BaudRate, _parameters.Parity, _parameters.DataBits, _parameters.StopBits)
+            var sp = new SerialPort(_parameters.PortName.Trim(), _parameters.BaudRate, _parameters.Parity, _parameters.DataBits, _parameters.StopBits)
             {
                 DtrEnable = _parameters.DtrEnable,
                 RtsEnable = _parameters.RtsEnable,
@@ -163,41 +175,41 @@ public sealed class SerialPortChannel : ChannelBase
 
     public override async Task SendAsync(byte[] data, string? targetSessionId = null, CancellationToken cancellationToken = default)
     {
-        if (_port is not { IsOpen: true })
+        var port = _port;
+        if (port is not { IsOpen: true })
             throw new InvalidOperationException("串口未连接");
 
-        await _port.BaseStream.WriteAsync(data, cancellationToken);
-        await _port.BaseStream.FlushAsync(cancellationToken);
+        await port.BaseStream.WriteAsync(data, cancellationToken);
+        await port.BaseStream.FlushAsync(cancellationToken);
         RecordSent(data.Length);
     }
 
     public override async Task CloseAsync()
     {
-        var cts = _cts;
-        _cts = null;
+        var cts = Interlocked.Exchange(ref _cts, null);
         if (cts != null)
         {
-            await cts.CancelAsync();
-            cts.Dispose();
+            try { await cts.CancelAsync(); } catch { /* ignore */ }
         }
 
-        if (_port != null)
+        var port = Interlocked.Exchange(ref _port, null);
+        if (port != null)
         {
             try
             {
-                if (_port.IsOpen) _port.Close();
+                if (port.IsOpen) port.Close();
             }
             catch { /* ignore close error */ }
-            _port.Dispose();
-            _port = null;
+            port.Dispose();
         }
 
-        if (_readLoopTask != null)
+        var readTask = Interlocked.Exchange(ref _readLoopTask, null);
+        if (readTask != null)
         {
-            try { await _readLoopTask; } catch { /* ignore */ }
-            _readLoopTask = null;
+            try { await readTask; } catch { /* ignore */ }
         }
 
+        cts?.Dispose();
         State = ChannelState.Disconnected;
     }
 }
@@ -255,8 +267,8 @@ public sealed class TcpClientChannel : ChannelBase
     private TcpClient? _client;
     private NetworkStream? _stream;
     private CancellationTokenSource? _cts;
-    private Task? _readLoopTask;
-    private bool _manualClosing;
+    private Task? _supervisorTask;
+    private volatile bool _manualClosing;
 
     public TcpClientChannel(TcpClientParameters parameters)
     {
@@ -267,50 +279,111 @@ public sealed class TcpClientChannel : ChannelBase
 
     public override async Task OpenAsync(CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(_parameters.Host))
+            throw new ArgumentException("TCP 主机地址不能为空", nameof(_parameters.Host));
+        if (_parameters.Port is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.Port), "TCP 端口必须在 1 至 65535 之间");
+
+        await CloseAsync();
+
         _manualClosing = false;
         State = ChannelState.Connecting;
-        await ConnectCoreAsync(cancellationToken);
-    }
-
-    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
-    {
-        var client = new TcpClient { NoDelay = true };
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(_parameters.ConnectTimeoutMs);
+        var sessionCts = new CancellationTokenSource();
+        _cts = sessionCts;
 
         try
         {
-            await client.ConnectAsync(_parameters.Host, _parameters.Port, timeoutCts.Token);
+            await ConnectSocketAsync(cancellationToken, sessionCts.Token);
+            _supervisorTask = Task.Run(() => SupervisorLoopAsync(sessionCts.Token), CancellationToken.None);
+        }
+        catch
+        {
+            CleanupSocket();
+            var cts = Interlocked.Exchange(ref _cts, null);
+            cts?.Dispose();
+            State = ChannelState.Faulted;
+            throw;
+        }
+    }
+
+    private async Task ConnectSocketAsync(CancellationToken callerToken, CancellationToken sessionToken)
+    {
+        int connectTimeoutMs = Math.Clamp(_parameters.ConnectTimeoutMs, 100, 60000);
+        var client = new TcpClient { NoDelay = true };
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(callerToken, sessionToken);
+        linkedCts.CancelAfter(connectTimeoutMs);
+
+        try
+        {
+            await client.ConnectAsync(_parameters.Host.Trim(), _parameters.Port, linkedCts.Token);
             _client = client;
             _stream = client.GetStream();
-            _cts = new CancellationTokenSource();
-            _readLoopTask = Task.Run(() => ReadLoopAsync(_cts.Token), CancellationToken.None);
             State = ChannelState.Connected;
         }
         catch (Exception ex)
         {
-            client.Dispose();
-            State = ChannelState.Faulted;
+            try { client.Dispose(); } catch { }
             OnError($"TCP 连接失败: {ex.Message}");
             throw;
         }
     }
 
-    private async Task ReadLoopAsync(CancellationToken token)
+    private async Task SupervisorLoopAsync(CancellationToken sessionToken)
+    {
+        int reconnectIntervalMs = Math.Clamp(_parameters.ReconnectIntervalMs, 200, 60000);
+
+        while (!sessionToken.IsCancellationRequested && !_manualClosing)
+        {
+            await ReadCurrentStreamAsync(sessionToken);
+
+            if (sessionToken.IsCancellationRequested || _manualClosing)
+                break;
+
+            CleanupSocket();
+
+            if (!_parameters.AutoReconnect)
+            {
+                State = ChannelState.Disconnected;
+                break;
+            }
+
+            State = ChannelState.Reconnecting;
+            while (!sessionToken.IsCancellationRequested && !_manualClosing)
+            {
+                try
+                {
+                    await Task.Delay(reconnectIntervalMs, sessionToken);
+                    if (sessionToken.IsCancellationRequested || _manualClosing)
+                        return;
+
+                    await ConnectSocketAsync(CancellationToken.None, sessionToken);
+                    break; // connected -> return to outer ReadCurrentStreamAsync loop
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch
+                {
+                    State = ChannelState.Reconnecting;
+                }
+            }
+        }
+    }
+
+    private async Task ReadCurrentStreamAsync(CancellationToken token)
     {
         var buffer = new byte[4096];
-        while (!token.IsCancellationRequested && _stream != null)
+        var stream = _stream;
+        while (!token.IsCancellationRequested && !_manualClosing && stream != null)
         {
             try
             {
-                int read = await _stream.ReadAsync(buffer, token);
+                int read = await stream.ReadAsync(buffer, token);
                 if (read == 0)
                 {
-                    if (!_manualClosing)
-                    {
+                    if (!token.IsCancellationRequested && !_manualClosing)
                         OnError("TCP 远端连接已断开");
-                        await HandleDisconnectAndMaybeReconnectAsync(token);
-                    }
                     break;
                 }
 
@@ -325,79 +398,50 @@ public sealed class TcpClientChannel : ChannelBase
             catch (Exception ex)
             {
                 if (!token.IsCancellationRequested && !_manualClosing)
-                {
                     OnError($"TCP 读取异常: {ex.Message}");
-                    await HandleDisconnectAndMaybeReconnectAsync(token);
-                }
                 break;
             }
         }
     }
 
-    private async Task HandleDisconnectAndMaybeReconnectAsync(CancellationToken token)
-    {
-        CleanupSocket();
-        if (_parameters.AutoReconnect && !_manualClosing && !token.IsCancellationRequested)
-        {
-            State = ChannelState.Reconnecting;
-            while (!token.IsCancellationRequested && !_manualClosing)
-            {
-                try
-                {
-                    await Task.Delay(_parameters.ReconnectIntervalMs, token);
-                    await ConnectCoreAsync(token);
-                    return;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch
-                {
-                    State = ChannelState.Reconnecting;
-                }
-            }
-        }
-        else
-        {
-            State = ChannelState.Disconnected;
-        }
-    }
-
     private void CleanupSocket()
     {
-        try { _stream?.Dispose(); } catch { }
-        try { _client?.Dispose(); } catch { }
-        _stream = null;
-        _client = null;
+        var stream = Interlocked.Exchange(ref _stream, null);
+        var client = Interlocked.Exchange(ref _client, null);
+        try { stream?.Dispose(); } catch { }
+        try { client?.Dispose(); } catch { }
     }
 
     public override async Task SendAsync(byte[] data, string? targetSessionId = null, CancellationToken cancellationToken = default)
     {
-        if (_stream == null || _client is not { Connected: true })
+        var stream = _stream;
+        var client = _client;
+        if (State != ChannelState.Connected || stream == null || client is not { Connected: true })
             throw new InvalidOperationException("TCP 客户端未连接");
 
-        await _stream.WriteAsync(data, cancellationToken);
-        await _stream.FlushAsync(cancellationToken);
+        await stream.WriteAsync(data, cancellationToken);
+        await stream.FlushAsync(cancellationToken);
         RecordSent(data.Length);
     }
 
     public override async Task CloseAsync()
     {
         _manualClosing = true;
-        var cts = _cts;
-        _cts = null;
+        var cts = Interlocked.Exchange(ref _cts, null);
         if (cts != null)
         {
-            await cts.CancelAsync();
-            cts.Dispose();
+            try { await cts.CancelAsync(); } catch { }
         }
+
         CleanupSocket();
-        if (_readLoopTask != null)
+
+        var supervisor = Interlocked.Exchange(ref _supervisorTask, null);
+        if (supervisor != null)
         {
-            try { await _readLoopTask; } catch { }
-            _readLoopTask = null;
+            try { await supervisor; } catch { }
         }
+
+        cts?.Dispose();
         State = ChannelState.Disconnected;
     }
 }
@@ -418,6 +462,13 @@ public sealed class UdpChannel : ChannelBase
 
     public override Task OpenAsync(CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(_parameters.RemoteHost))
+            throw new ArgumentException("UDP 远程主机不能为空", nameof(_parameters.RemoteHost));
+        if (_parameters.RemotePort is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.RemotePort), "UDP 远程端口必须在 1 至 65535 之间");
+        if (_parameters.LocalPort is < 0 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.LocalPort), "UDP 本地端口必须在 0 至 65535 之间");
+
         State = ChannelState.Connecting;
         try
         {
@@ -439,11 +490,13 @@ public sealed class UdpChannel : ChannelBase
 
     private async Task ReadLoopAsync(CancellationToken token)
     {
-        while (!token.IsCancellationRequested && _udp != null)
+        while (!token.IsCancellationRequested)
         {
+            var udp = _udp;
+            if (udp == null) break;
             try
             {
-                var result = await _udp.ReceiveAsync(token);
+                var result = await udp.ReceiveAsync(token);
                 if (result.Buffer.Length > 0)
                     OnDataReceived(result.Buffer);
             }
@@ -451,12 +504,14 @@ public sealed class UdpChannel : ChannelBase
             {
                 break;
             }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 if (!token.IsCancellationRequested)
-                {
                     OnError($"UDP 接收异常: {ex.Message}");
-                }
                 break;
             }
         }
@@ -464,29 +519,36 @@ public sealed class UdpChannel : ChannelBase
 
     public override async Task SendAsync(byte[] data, string? targetSessionId = null, CancellationToken cancellationToken = default)
     {
-        if (_udp == null)
+        var udp = _udp;
+        if (udp == null || State != ChannelState.Connected)
             throw new InvalidOperationException("UDP 通道未开启");
 
-        await _udp.SendAsync(data, data.Length, _parameters.RemoteHost, _parameters.RemotePort);
+        await udp.SendAsync(data.AsMemory(), _parameters.RemoteHost.Trim(), _parameters.RemotePort, cancellationToken);
         RecordSent(data.Length);
     }
 
     public override async Task CloseAsync()
     {
-        var cts = _cts;
-        _cts = null;
+        var cts = Interlocked.Exchange(ref _cts, null);
         if (cts != null)
         {
-            await cts.CancelAsync();
-            cts.Dispose();
+            try { await cts.CancelAsync(); } catch { }
         }
-        _udp?.Dispose();
-        _udp = null;
-        if (_readLoopTask != null)
+
+        var udp = Interlocked.Exchange(ref _udp, null);
+        if (udp != null)
         {
-            try { await _readLoopTask; } catch { }
-            _readLoopTask = null;
+            try { udp.Close(); } catch { }
+            udp.Dispose();
         }
+
+        var readTask = Interlocked.Exchange(ref _readLoopTask, null);
+        if (readTask != null)
+        {
+            try { await readTask; } catch { }
+        }
+
+        cts?.Dispose();
         State = ChannelState.Disconnected;
     }
 }
@@ -529,6 +591,9 @@ public sealed class TcpServerChannel : ChannelBase
 
     public override Task OpenAsync(CancellationToken cancellationToken = default)
     {
+        if (_parameters.ListenPort is < 1 or > 65535)
+            throw new ArgumentOutOfRangeException(nameof(_parameters.ListenPort), "TCP 服务端监听端口必须在 1 至 65535 之间");
+
         State = ChannelState.Connecting;
         try
         {
@@ -676,26 +741,25 @@ public sealed class TcpServerChannel : ChannelBase
 
     public override async Task CloseAsync()
     {
-        var cts = _cts;
-        _cts = null;
+        var cts = Interlocked.Exchange(ref _cts, null);
         if (cts != null)
         {
-            await cts.CancelAsync();
-            cts.Dispose();
+            try { await cts.CancelAsync(); } catch { }
         }
 
-        try { _listener?.Stop(); } catch { }
-        _listener = null;
+        var listener = Interlocked.Exchange(ref _listener, null);
+        try { listener?.Stop(); } catch { }
 
         foreach (var id in _clients.Keys.ToArray())
             DisconnectClient(id);
 
-        if (_acceptLoopTask != null)
+        var acceptTask = Interlocked.Exchange(ref _acceptLoopTask, null);
+        if (acceptTask != null)
         {
-            try { await _acceptLoopTask; } catch { }
-            _acceptLoopTask = null;
+            try { await acceptTask; } catch { }
         }
 
+        cts?.Dispose();
         State = ChannelState.Disconnected;
     }
 }

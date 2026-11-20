@@ -710,7 +710,6 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
                 catch (Exception ex)
                 {
                     group.LastStatus = $"失败 · {ex.Message}";
-                    _latestRowsByGroup.Remove(group.Id);
                 }
                 finally
                 {
@@ -876,12 +875,7 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
             updatedRows.Add(row);
         }
 
-        if (!Rows.Select(row => row.ChannelId).SequenceEqual(updatedRows.Select(row => row.ChannelId), StringComparer.Ordinal))
-        {
-            Rows.Clear();
-            foreach (var row in updatedRows)
-                Rows.Add(row);
-        }
+        SyncObservableCollection(Rows, updatedRows, row => row.ChannelId);
 
         if (!IsFrozen && incoming.Count > 0)
         {
@@ -934,16 +928,50 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
             updatedChannels.Add(channel);
         }
 
-        if (!ScopeChannels.Select(channel => channel.Id).SequenceEqual(updatedChannels.Select(channel => channel.Id), StringComparer.Ordinal))
-        {
-            ScopeChannels.Clear();
-            foreach (var channel in updatedChannels)
-                ScopeChannels.Add(channel);
-        }
+        SyncObservableCollection(ScopeChannels, updatedChannels, channel => channel.Id);
 
-        TriggerChannel = updatedChannels.FirstOrDefault(c => c.Id == existingTriggerId)
+        var nextTrigger = updatedChannels.FirstOrDefault(c => c.Id == existingTriggerId)
             ?? updatedChannels.FirstOrDefault(c => c.Enabled)
             ?? updatedChannels.FirstOrDefault();
+        if (!ReferenceEquals(TriggerChannel, nextTrigger))
+            TriggerChannel = nextTrigger;
+    }
+
+    private static void SyncObservableCollection<T>(
+        System.Collections.ObjectModel.ObservableCollection<T> target,
+        IList<T> desired,
+        Func<T, string> keySelector)
+    {
+        var desiredKeys = new HashSet<string>(desired.Select(keySelector), StringComparer.Ordinal);
+        for (int i = target.Count - 1; i >= 0; i--)
+        {
+            if (!desiredKeys.Contains(keySelector(target[i])))
+                target.RemoveAt(i);
+        }
+
+        for (int i = 0; i < desired.Count; i++)
+        {
+            var item = desired[i];
+            string key = keySelector(item);
+            int existingIndex = -1;
+            for (int j = i; j < target.Count; j++)
+            {
+                if (string.Equals(keySelector(target[j]), key, StringComparison.Ordinal))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex < 0)
+            {
+                target.Insert(i, item);
+            }
+            else if (existingIndex != i)
+            {
+                target.Move(existingIndex, i);
+            }
+        }
     }
 
     private void ExportCsv()

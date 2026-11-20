@@ -1,0 +1,207 @@
+{
+  "frames": [
+    {
+      "name": "RTU FC03 Read Holding Registers",
+      "kind": "read",
+      "transport": "Rtu",
+      "unitId": 1,
+      "functionCode": 3,
+      "address": 0,
+      "quantity": 2,
+      "transactionId": 1,
+      "expectedHex": "01 03 00 00 00 02 C4 0B"
+    },
+    {
+      "name": "TCP FC03 Read Holding Registers",
+      "kind": "read",
+      "transport": "Tcp",
+      "unitId": 1,
+      "functionCode": 3,
+      "address": 0,
+      "quantity": 2,
+      "transactionId": 1,
+      "expectedHex": "00 01 00 00 00 06 01 03 00 00 00 02"
+    },
+    {
+      "name": "ASCII FC03 Read Holding Registers",
+      "kind": "read",
+      "transport": "Ascii",
+      "unitId": 1,
+      "functionCode": 3,
+      "address": 0,
+      "quantity": 2,
+      "transactionId": 1,
+      "expectedHex": "3A 30 31 30 33 30 30 30 30 30 30 30 32 46 41 0D 0A"
+    },
+    {
+      "name": "RTU Broadcast FC06 Write Single Register",
+      "kind": "writeSingle",
+      "transport": "Rtu",
+      "unitId": 0,
+      "functionCode": 6,
+      "address": 10,
+      "value": 4660,
+      "transactionId": 1,
+      "expectedHex": "00 06 00 0A 12 34 A5 6E"
+    },
+    {
+      "name": "TCP FC10 Write Multiple Registers",
+      "kind": "writeMultiple",
+      "transport": "Tcp",
+      "unitId": 1,
+      "functionCode": 16,
+      "address": 5,
+      "values": [100, 200],
+      "transactionId": 42,
+      "expectedHex": "00 2A 00 00 00 0B 01 10 00 05 00 02 04 00 64 00 C8"
+    },
+    {
+      "name": "RTU FC0F Write Multiple Coils",
+      "kind": "writeMultiple",
+      "transport": "Rtu",
+      "unitId": 1,
+      "functionCode": 15,
+      "address": 0,
+      "values": [1, 0, 1, 1, 0, 0, 1, 0, 1],
+      "transactionId": 1,
+      "expectedHex": "01 0F 00 00 00 09 02 4D 01 11 EC"
+    }
+  ],
+  "byteOrderVectors": [
+    {
+      "name": "Int16 BigEndian negative",
+      "dataType": "Int16",
+      "byteOrder": "BigEndian",
+      "registers": [65436],
+      "scale": 1,
+      "expected": -100,
+      "tolerance": 0
+    },
+    {
+      "name": "UInt16 ByteSwap",
+      "dataType": "UInt16",
+      "byteOrder": "ByteSwap",
+      "registers": [13330],
+      "scale": 0.1,
+      "expected": 466.0,
+      "tolerance": 1e-6
+    },
+    {
+      "name": "UInt32 BigEndian 0x12345678",
+      "dataType": "UInt32",
+      "byteOrder": "BigEndian",
+      "registers": [4660, 22136],
+      "scale": 1,
+      "expected": 305419896,
+      "tolerance": 0
+    },
+    {
+      "name": "UInt32 LittleEndian 0x12345678",
+      "dataType": "UInt32",
+      "byteOrder": "LittleEndian",
+      "registers": [30806, 13330],
+      "scale": 1,
+      "expected": 305419896,
+      "tolerance": 0
+    },
+    {
+      "name": "UInt32 WordSwap 0x12345678",
+      "dataType": "UInt32",
+      "byteOrder": "WordSwap",
+      "registers": [22136, 4660],
+      "scale": 1,
+      "expected": 305419896,
+      "tolerance": 0
+    },
+    {
+      "name": "UInt32 ByteSwap 0x12345678",
+      "dataType": "UInt32",
+      "byteOrder": "ByteSwap",
+      "registers": [13330, 30806],
+      "scale": 1,
+      "expected": 305419896,
+      "tolerance": 0
+    },
+    {
+      "name": "Float 25.5 BigEndian",
+      "dataType": "Float",
+      "byteOrder": "BigEndian",
+      "registers": [16844, 0],
+      "scale": 1,
+      "expected": 25.5,
+      "tolerance": 1e-5
+    },
+    {
+      "name": "Float 25.5 LittleEndian",
+      "dataType": "Float",
+      "byteOrder": "LittleEndian",
+      "registers": [0, 52289],
+      "scale": 1,
+      "expected": 25.5,
+      "tolerance": 1e-5
+    },
+    {
+      "name": "Float 25.5 WordSwap",
+      "dataType": "Float",
+      "byteOrder": "WordSwap",
+      "registers": [0, 16844],
+      "scale": 1,
+      "expected": 25.5,
+      "tolerance": 1e-5
+    },
+    {
+      "name": "Float 25.5 ByteSwap",
+      "dataType": "Float",
+      "byteOrder": "ByteSwap",
+      "registers": [52289, 0],
+      "scale": 1,
+      "expected": 25.5,
+      "tolerance": 1e-5
+    },
+    {
+      "name": "Double Pi BigEndian",
+      "dataType": "Double",
+      "byteOrder": "BigEndian",
+      "registers": [16393, 8699, 21572, 11544],
+      "scale": 1,
+      "expected": 3.141592653589793,
+      "tolerance": 1e-9
+    },
+    {
+      "name": "Double Pi LittleEndian",
+      "dataType": "Double",
+      "byteOrder": "LittleEndian",
+      "registers": [6189, 17492, 64289, 2368],
+      "scale": 1,
+      "expected": 3.141592653589793,
+      "tolerance": 1e-9
+    },
+    {
+      "name": "Double Pi WordSwap",
+      "dataType": "Double",
+      "byteOrder": "WordSwap",
+      "registers": [11544, 21572, 8699, 16393],
+      "scale": 1,
+      "expected": 3.141592653589793,
+      "tolerance": 1e-9
+    },
+    {
+      "name": "Double Pi ByteSwap",
+      "dataType": "Double",
+      "byteOrder": "ByteSwap",
+      "registers": [2368, 64289, 17492, 6189],
+      "scale": 1,
+      "expected": 3.141592653589793,
+      "tolerance": 1e-9
+    }
+  ],
+  "serverCodecRoundTrips": [
+    { "dataType": "Int16", "byteOrder": "LittleEndian", "value": "-1234" },
+    { "dataType": "UInt16", "byteOrder": "ByteSwap", "value": "54321" },
+    { "dataType": "Int32", "byteOrder": "WordSwap", "value": "-987654321" },
+    { "dataType": "UInt32", "byteOrder": "LittleEndian", "value": "3456789012" },
+    { "dataType": "Float", "byteOrder": "ByteSwap", "value": "-123.75" },
+    { "dataType": "Double", "byteOrder": "WordSwap", "value": "123456.789" },
+    { "dataType": "Double", "byteOrder": "LittleEndian", "value": "-9876.54321" }
+  ]
+}

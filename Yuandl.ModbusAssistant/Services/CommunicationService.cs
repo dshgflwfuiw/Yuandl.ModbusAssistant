@@ -174,8 +174,14 @@ public sealed class CommunicationService : IDisposable
         int retries = 2,
         CancellationToken cancellationToken = default)
     {
+        if (request == null || request.Length == 0)
+            throw new ArgumentException("Modbus 请求报文不能为空", nameof(request));
+
         if (_activeChannel == null || _activeChannel.State != ChannelState.Connected)
             throw new InvalidOperationException("请先在通讯连接页建立连接");
+
+        int normalizedTimeoutMs = Math.Clamp(timeoutMs, 100, 30000);
+        int normalizedRetries = Math.Clamp(retries, 0, 10);
 
         bool hasMeta = TryExtractRequestMeta(request, transport, out byte expectedUnitId, out byte expectedFn, out ushort? expectedTxId);
         if (hasMeta && expectedUnitId == 0 && expectedFn is 5 or 6 or 15 or 16)
@@ -197,7 +203,7 @@ public sealed class CommunicationService : IDisposable
         try
         {
             Exception? lastException = null;
-            int maxAttempts = Math.Max(1, retries + 1);
+            int maxAttempts = Math.Max(1, normalizedRetries + 1);
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
@@ -234,7 +240,7 @@ public sealed class CommunicationService : IDisposable
                 {
                     await SendAsync(request, null, cancellationToken);
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeoutCts.CancelAfter(Math.Clamp(timeoutMs, 100, 30000));
+                    timeoutCts.CancelAfter(normalizedTimeoutMs);
                     using var reg = timeoutCts.Token.Register(() => tcs.TrySetException(new TimeoutException("Modbus 响应超时")));
 
                     return await tcs.Task;
@@ -415,7 +421,16 @@ public sealed class CommunicationService : IDisposable
             else if (respFn is 1 or 2 or 3 or 4)
             {
                 if (buffer.Count < 3) return false;
-                expectedLen = 5 + buffer[2];
+                byte byteCount = buffer[2];
+                bool validByteCount = respFn is 3 or 4
+                    ? byteCount is >= 2 and <= 250 && byteCount % 2 == 0
+                    : byteCount is >= 1 and <= 250;
+                if (!validByteCount)
+                {
+                    buffer.RemoveAt(0);
+                    continue;
+                }
+                expectedLen = 5 + byteCount;
             }
             else if (respFn is 5 or 6 or 15 or 16)
             {
@@ -493,8 +508,12 @@ public sealed class CommunicationService : IDisposable
         ErrorOccurred?.Invoke(this, message);
     }
 
+    private int _disposed;
+
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
         _ = DisconnectAsync();
         _exchangeLock.Dispose();
         _sendLock.Dispose();

@@ -547,6 +547,18 @@ public sealed class ModbusServerService : IDisposable
 
             if (!allowRtu)
             {
+                if (allowAscii)
+                {
+                    int colon = buffer.IndexOf((byte)':');
+                    if (colon < 0)
+                    {
+                        buffer.Clear();
+                        return false;
+                    }
+                    buffer.RemoveRange(0, colon);
+                    continue;
+                }
+
                 buffer.RemoveAt(0);
                 continue;
             }
@@ -576,10 +588,15 @@ public sealed class ModbusServerService : IDisposable
             else
             {
                 expectedLength = 0;
-                if (buffer.Count >= 4 && Crc16.Verify(buffer.GetRange(0, 4).ToArray()))
-                    expectedLength = 4;
-                else if (buffer.Count >= 8 && Crc16.Verify(buffer.GetRange(0, 8).ToArray()))
-                    expectedLength = 8;
+                int maxProbe = Math.Min(buffer.Count, 64);
+                for (int len = 4; len <= maxProbe; len++)
+                {
+                    if (Crc16.Verify(buffer.GetRange(0, len).ToArray()))
+                    {
+                        expectedLength = len;
+                        break;
+                    }
+                }
 
                 if (expectedLength == 0)
                 {

@@ -66,13 +66,19 @@ export const ModbusDebugPage: React.FC = () => {
   };
 
   const buildRequest = (): string => {
+    const unitId = Math.min(247, Math.max(0, Math.floor(slaveId) || 0));
+    const isReadFn = fnCode === 1 || fnCode === 2 || fnCode === 3 || fnCode === 4;
+    if (unitId === 0 && isReadFn) {
+      throw new Error('广播地址 0 仅支持写功能码 (05/06/0F/10)');
+    }
+
     const txId = txIdRef.current++;
     if (txIdRef.current > 65535) txIdRef.current = 1;
 
     let frame: Uint8Array;
     if (isSingleWrite) {
       frame = ModbusFrame.buildWriteSingle(
-        slaveId,
+        unitId,
         fnCode,
         startAddress,
         writeValue,
@@ -83,7 +89,7 @@ export const ModbusDebugPage: React.FC = () => {
       const values = ModbusFrame.parseMultiValues(multiValuesText, fnCode === 15);
       setQuantity(values.length);
       frame = ModbusFrame.buildWriteMultiple(
-        slaveId,
+        unitId,
         fnCode,
         startAddress,
         values,
@@ -92,7 +98,7 @@ export const ModbusDebugPage: React.FC = () => {
       );
     } else {
       frame = ModbusFrame.buildRequest(
-        slaveId,
+        unitId,
         fnCode,
         startAddress,
         quantity,
@@ -173,11 +179,19 @@ export const ModbusDebugPage: React.FC = () => {
         body: JSON.stringify({
           requestHex: hex,
           timeoutMs: settings.defaultTimeoutMs,
+          retries: settings.defaultRetryTimes,
+          transport: selectedTransport,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         setStatusText(`请求失败：${data.error || '发送失败'}`);
+        return;
+      }
+      if (data.broadcast || !data.responseHex) {
+        setResponseHex('');
+        setResultText('广播写入已发送（Modbus 协议规定从站静默执行，不返回响应）');
+        setStatusText('广播发送完成');
         return;
       }
       setResponseHex(data.responseHex);
@@ -195,7 +209,7 @@ export const ModbusDebugPage: React.FC = () => {
       <div>
         <h1 className="text-xl font-semibold">Modbus 调试</h1>
         <p className="text-xs text-[var(--text-secondary)] mt-1">
-          自动生成 RTU、ASCII、TCP 请求（支持 0F/10 多值批量写入），校验 CRC/LRC 并解析响应。
+          自动生成 RTU、ASCII、TCP 请求（支持 0F/10 多值批量写入与站号 0 广播写），校验 CRC/LRC 并解析响应。
         </p>
       </div>
 
@@ -203,15 +217,15 @@ export const ModbusDebugPage: React.FC = () => {
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-xs text-[var(--text-secondary)] mb-1">
-              从站地址
+              从站地址 (0=广播)
             </label>
             <input
               type="number"
-              min={1}
+              min={0}
               max={247}
               value={slaveId}
               onChange={(e) => setSlaveId(Number(e.target.value))}
-              className="fluent-input w-20"
+              className="fluent-input w-24"
             />
           </div>
 

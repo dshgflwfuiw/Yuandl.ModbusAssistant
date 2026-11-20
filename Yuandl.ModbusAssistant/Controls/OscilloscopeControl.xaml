@@ -3,6 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Yuandl.ModbusAssistant.Controls"
              Background="#060A10"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True"
              ClipToBounds="True">
     <Grid>
         <controls:OscilloscopeSurface x:Name="Surface" />
