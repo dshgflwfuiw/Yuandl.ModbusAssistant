@@ -34,7 +34,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         PacketAnalysis = new PacketAnalysisViewModel(CommunicationService);
         DeviceManagement = new DeviceManagementViewModel(_persistence)
         {
-            OnApplyProfile = ApplyDeviceProfileAsync
+            OnApplyProfile = ApplyDeviceProfileAsync,
+            OnImportWorkspace = ApplyImportedWorkspace
         };
 
         CommunicationService.StateChanged += (_, _) => RunOnUi(UpdateStatusBar);
@@ -72,6 +73,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         await Connection.ApplyDeviceProfileAsync(profile, autoConnect);
         SelectedTabIndex = 0;
+    }
+
+    private void ApplyImportedWorkspace(WorkspaceConfiguration workspace)
+    {
+        Settings.ApplyImportedSettings(workspace.Settings);
+        Connection.StageImportedServerConfiguration(workspace.ServerConfig);
+        RegisterMonitor.ReloadImportedConfiguration();
     }
 
     private void UpdateStatusBar()

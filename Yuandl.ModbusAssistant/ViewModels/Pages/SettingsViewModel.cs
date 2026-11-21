@@ -80,6 +80,14 @@ public sealed class SettingsViewModel : ObservableObject
     public RelayCommand SaveCommand { get; }
     public RelayCommand OpenLogFolderCommand { get; }
 
+    public void ApplyImportedSettings(AppSettings settings)
+    {
+        IsDarkTheme = settings.IsDarkTheme;
+        DefaultTimeoutMs = settings.DefaultTimeoutMs;
+        DefaultRetryTimes = settings.DefaultRetryTimes;
+        SaveSettings();
+    }
+
     private void SaveSettings()
     {
         _persistence.SaveSettings(new AppSettings

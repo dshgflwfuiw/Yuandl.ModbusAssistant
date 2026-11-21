@@ -83,6 +83,7 @@ export const ConnectionPage: React.FC = () => {
     '/dev/ttyUSB0',
   ]);
   const [isBusy, setIsBusy] = useState(false);
+  const [activePanel, setActivePanel] = useState<'channel' | 'modbus-server'>('channel');
 
   // Modbus Server state (TCP & Serial)
   const [serverMode, setServerMode] = useState<ModbusServerTransportMode>(
@@ -518,6 +519,15 @@ export const ConnectionPage: React.FC = () => {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as ModbusServerConfiguration;
+      if (!Array.isArray(parsed.registers)) throw new Error('配置中缺少 registers 点表数组');
+      parsed.registers.forEach((definition) => ServerRegisterCodec.validate(definition));
+      ServerRegisterCodec.validateNoOverlap(parsed.registers);
+      const existingKeys = new Set(status.serverRegisters.map((r) => `${r.area}:${r.address}`));
+      const collisions = parsed.registers.filter((r) => existingKeys.has(`${r.area}:${r.address}`)).length;
+      const accepted = window.confirm(
+        `导入预览\n\n将载入 ${parsed.registers.length} 项点表定义，并替换当前 ${status.serverRegisters.length} 项暂存定义。\n其中 ${collisions} 项起始地址与现有定义相同。\n\n确认后配置会加载到从站；若从站正在运行，具体生效行为由服务端配置接口决定。继续吗？`
+      );
+      if (!accepted) return;
       const res = await fetch('/api/server/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -564,17 +574,29 @@ export const ConnectionPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-4">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-4">
       {/* 1. 标题区 */}
       <div>
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">
-          通讯链路管理
+          {activePanel === 'channel' ? '通讯链路管理' : 'Modbus 从站与点表'}
         </h1>
         <p className="text-xs text-[var(--text-secondary)] mt-1">
-          配置串行端口 (RS232/RS485)、TCP 客户端、UDP 通讯及无协议 TCP 服务端监听链路
+          {activePanel === 'channel'
+            ? '配置串行端口 (RS232/RS485)、TCP 客户端、UDP 通讯及无协议 TCP 服务端监听链路'
+            : '配置内置 Modbus 从站、访问限制与寄存器点表'}
         </p>
       </div>
 
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="连接工作区">
+        <button type="button" role="tab" aria-selected={activePanel === 'channel'} onClick={() => setActivePanel('channel')} className={`fluent-btn text-xs ${activePanel === 'channel' ? 'fluent-btn-primary' : ''}`}>
+          通信通道
+        </button>
+        <button type="button" role="tab" aria-selected={activePanel === 'modbus-server'} onClick={() => setActivePanel('modbus-server')} className={`fluent-btn text-xs ${activePanel === 'modbus-server' ? 'fluent-btn-primary' : ''}`}>
+          Modbus 从站与点表
+        </button>
+      </div>
+
+      {activePanel === 'channel' && <>
       {/* 2. 主配置区域 */}
       <div className="fluent-card p-5 space-y-4">
         <div>
@@ -588,7 +610,7 @@ export const ConnectionPage: React.FC = () => {
                 selectedCommTypeIndex: Number(e.target.value),
               }))
             }
-            className="fluent-input w-72"
+            className="fluent-input w-full max-w-72"
           >
             <option value={0}>RS232 / RS485 串行端口</option>
             <option value={1}>TCP Client (客户端)</option>
@@ -1118,7 +1140,9 @@ export const ConnectionPage: React.FC = () => {
           </button>
         </div>
       </div>
+      </>}
 
+      {activePanel === 'modbus-server' && <>
       {/* 4. Modbus 服务器模式 (TCP / 串口) */}
       <div className="fluent-card p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1717,6 +1741,7 @@ export const ConnectionPage: React.FC = () => {
           </table>
         </div>
       </div>
+      </>}
     </div>
   );
 };

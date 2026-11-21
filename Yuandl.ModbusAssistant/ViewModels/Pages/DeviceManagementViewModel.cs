@@ -1,4 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text;
+using System.Windows;
+using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Models;
 using Yuandl.ModbusAssistant.Services;
 
@@ -31,9 +35,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
         });
         SaveProfilesCommand = new RelayCommand(SaveProfiles, () => HasUnsavedChanges);
         RevertProfilesCommand = new RelayCommand(RevertProfiles, () => HasUnsavedChanges);
+        ExportWorkspaceCommand = new RelayCommand(ExportWorkspace);
+        ImportWorkspaceCommand = new RelayCommand(ImportWorkspace);
     }
 
     public Func<DeviceProfile, bool, Task>? OnApplyProfile { get; set; }
+    public Action<WorkspaceConfiguration>? OnImportWorkspace { get; set; }
 
     public ObservableCollection<DeviceProfile> Profiles { get; } = new();
     public IReadOnlyList<string> Protocols { get; } = new[] { "Modbus TCP", "Modbus RTU", "Modbus ASCII", "TCP Server", "UDP" };
@@ -73,6 +80,44 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public RelayCommand DeleteProfileCommand { get; }
     public RelayCommand SaveProfilesCommand { get; }
     public RelayCommand RevertProfilesCommand { get; }
+    public RelayCommand ExportWorkspaceCommand { get; }
+    public RelayCommand ImportWorkspaceCommand { get; }
+
+    private void ExportWorkspace()
+    {
+        var dlg = new SaveFileDialog { Filter = "Yuandl 工作区 (*.json)|*.json", FileName = "yuandl-modbus-workspace.json" };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            var workspace = _persistence.LoadWorkspace();
+            workspace.Profiles = Profiles.Select(CloneProfile).ToList();
+            File.WriteAllText(dlg.FileName, PersistenceService.SerializePortableWorkspace(workspace), new UTF8Encoding(true));
+            StatusBanner = $"已导出工作区: {dlg.FileName}";
+        }
+        catch (Exception ex) { StatusBanner = $"工作区导出失败: {ex.Message}"; }
+    }
+
+    private void ImportWorkspace()
+    {
+        var dlg = new OpenFileDialog { Filter = "Yuandl 工作区 (*.json)|*.json" };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            var info = new FileInfo(dlg.FileName);
+            if (info.Length > 10 * 1024 * 1024) throw new InvalidDataException("工作区文件超过 10 MB");
+            var workspace = PersistenceService.DeserializePortableWorkspace(File.ReadAllText(dlg.FileName, Encoding.UTF8));
+            foreach (var definition in workspace.ServerConfig.Registers) Yuandl.ModbusAssistant.Protocol.Modbus.ServerRegisterCodec.Validate(definition);
+            Yuandl.ModbusAssistant.Protocol.Modbus.ServerRegisterCodec.ValidateNoOverlap(workspace.ServerConfig.Registers);
+            if (MessageBox.Show($"将导入 {workspace.Profiles.Count} 个设备方案、{workspace.ServerConfig.Registers.Count} 项点表定义及系统/监听设置，并覆盖当前配置。\n导入的点表会先暂存，需在通讯页点击“应用点表”后生效。\n\n继续吗？", "导入工作区", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
+            _persistence.SaveWorkspace(workspace);
+            Profiles.Clear(); foreach (var profile in workspace.Profiles) Profiles.Add(CloneProfile(profile));
+            _savedSnapshot = workspace.Profiles.Select(CloneProfile).ToList();
+            HasUnsavedChanges = false;
+            OnImportWorkspace?.Invoke(workspace);
+            StatusBanner = $"工作区已导入 ({workspace.Profiles.Count} 个设备方案)";
+        }
+        catch (Exception ex) { StatusBanner = $"工作区导入失败: {ex.Message}"; }
+    }
 
     private void AddProfile()
     {

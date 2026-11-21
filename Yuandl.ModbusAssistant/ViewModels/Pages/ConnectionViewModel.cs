@@ -807,6 +807,13 @@ public sealed class ConnectionViewModel : ObservableObject
         RefreshLocalIpAddresses();
     }
 
+    public void StageImportedServerConfiguration(ModbusServerConfiguration config)
+    {
+        ApplyLoadedConfigToProperties(config);
+        ReloadRegisterRows(config.Registers);
+        MarkRegisterChangesPending($"工作区已载入 {config.Registers.Count} 项点表，点击“应用点表”使从站配置生效");
+    }
+
     private void ApplyLoadedConfigToProperties(ModbusServerConfiguration cfg)
     {
         ServerBindAddress = string.IsNullOrWhiteSpace(cfg.BindAddress) ? "127.0.0.1" : cfg.BindAddress;
@@ -930,6 +937,15 @@ public sealed class ConnectionViewModel : ObservableObject
                     ServerRegisterCodec.Validate(def);
                 ServerRegisterCodec.ValidateNoOverlap(cfg.Registers);
 
+                var currentKeys = ServerRegisters.Select(r => $"{r.Area}:{r.Address}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+                int conflicts = cfg.Registers.Count(r => currentKeys.Contains($"{r.Area}:{r.Address}"));
+                var confirm = MessageBox.Show(
+                    $"将载入 {cfg.Registers.Count} 项点表定义，并替换当前 {ServerRegisters.Count} 项暂存定义。\n其中 {conflicts} 项地址与当前点表相同。\n\n继续后仍需点击“应用点表”才会写入运行中的从站。",
+                    "确认导入 Modbus 配置",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+                if (confirm != MessageBoxResult.Yes) return;
+
                 ApplyLoadedConfigToProperties(cfg);
                 ReloadRegisterRows(cfg.Registers);
                 MarkRegisterChangesPending($"已载入 JSON 配置 ({cfg.Registers.Count} 项)，点击“应用点表”生效或“撤销修改”还原");
@@ -985,6 +1001,14 @@ public sealed class ConnectionViewModel : ObservableObject
 
             string rawText = ReadUtf8File(dlg.FileName);
             var imported = ParseRegisterDefinitionsFromCsv(rawText);
+            var currentKeys = ServerRegisters.Select(r => $"{r.Area}:{r.Address}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            int conflicts = imported.Count(r => currentKeys.Contains($"{r.Area}:{r.Address}"));
+            var confirm = MessageBox.Show(
+                $"CSV 校验通过：{imported.Count} 项点表定义，{conflicts} 项地址与当前点表相同。\n导入将替换当前 {ServerRegisters.Count} 项暂存定义，需再次点击“应用点表”才会生效。\n\n是否继续？",
+                "导入预览",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+            if (confirm != MessageBoxResult.Yes) return;
             ReloadRegisterRows(imported);
             MarkRegisterChangesPending($"已从 CSV 载入 {imported.Count} 项待应用点位，请点击“应用点表”生效或“撤销修改”还原");
         }

@@ -60,6 +60,7 @@ body,
 }
 
 .fluent-input {
+  max-width: 100%;
   background-color: var(--surface-card);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
@@ -124,4 +125,25 @@ body,
 .fluent-btn-danger:hover:not(:disabled) {
   background-color: var(--danger-hover);
   border-color: var(--danger-hover);
+}
+
+@media (max-width: 700px) {
+  .app-statusbar {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 7px 10px;
+  }
+
+  .app-statusbar > .statusbar-spacer,
+  .app-statusbar > .statusbar-spacer + div {
+    display: none;
+  }
+
+  .app-statusbar > div {
+    max-width: 100%;
+  }
+
+  .app-statusbar > .statusbar-divider {
+    display: none;
+  }
 }

@@ -330,8 +330,8 @@
 
                         <!-- Built-in Modbus Slave Server Card -->
                         <Border Style="{StaticResource CardBorder}">
-                            <StackPanel>
-                                <TextBlock Text="Modbus Slave Server" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,6" />
+                            <Expander Header="Modbus 从站服务与点表（点击展开配置）" IsExpanded="False">
+                            <StackPanel Margin="0,12,0,0">
                                 <DockPanel Margin="0,0,0,10">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                         <Button Style="{StaticResource PrimaryButton}" Content="应用点表" Command="{Binding ApplyRegistersCommand}" Margin="0,0,6,0" ToolTip="将暂存的点表定义同步至 Modbus 从站并持久化保存" />
@@ -537,6 +537,7 @@
                                     </DataGrid>
                                 </StackPanel>
                             </StackPanel>
+                            </Expander>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
@@ -1034,7 +1035,16 @@
                     </Border>
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="1">
-                        <DataGrid x:Name="CapturedPacketsGrid" ItemsSource="{Binding CapturedPackets}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
+                        <DockPanel LastChildFill="True">
+                            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10" VerticalAlignment="Center">
+                                <TextBlock Text="方向" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding DirectionFilters}" SelectedItem="{Binding DirectionFilter}" Width="85" Margin="0,0,10,0" Padding="5,4" />
+                                <TextBlock Text="功能码" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox Style="{StaticResource LocalizedComboBoxStyle}" ItemsSource="{Binding FunctionCodeFilters}" SelectedItem="{Binding FunctionCodeFilter}" Width="85" Margin="0,0,10,0" Padding="5,4" />
+                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Width="260" Padding="6,4" Margin="0,0,8,0" ToolTip="搜索 HEX、解析结果、会话或协议" />
+                                <TextBlock Text="显示条数受 500 条缓存限制" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" FontSize="11" />
+                            </WrapPanel>
+                            <DataGrid x:Name="CapturedPacketsGrid" ItemsSource="{Binding CapturedPacketsView}" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="时间" Binding="{Binding Timestamp}" Width="105" />
                                 <DataGridTextColumn Header="方向" Binding="{Binding Direction}" Width="60" />
@@ -1043,7 +1053,8 @@
                                 <DataGridTextColumn Header="原始 HEX" Binding="{Binding Hex}" Width="260" />
                                 <DataGridTextColumn Header="解析结论" Binding="{Binding Result}" Width="*" />
                             </DataGrid.Columns>
-                        </DataGrid>
+                            </DataGrid>
+                        </DockPanel>
                     </Border>
 
                     <Border Style="{StaticResource CardBorder}" Grid.Row="2" Margin="0">
@@ -1078,6 +1089,8 @@
                         <StackPanel>
                             <DockPanel Margin="0,0,0,8">
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Style="{StaticResource SecondaryButton}" Content="导入工作区" Command="{Binding ImportWorkspaceCommand}" Margin="0,0,6,0" />
+                                    <Button Style="{StaticResource SecondaryButton}" Content="导出工作区" Command="{Binding ExportWorkspaceCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource PrimaryButton}" Content="保存变更" Command="{Binding SaveProfilesCommand}" Margin="0,0,6,0" />
                                     <Button Style="{StaticResource SecondaryButton}" Content="撤销修改" Command="{Binding RevertProfilesCommand}" />
                                 </StackPanel>

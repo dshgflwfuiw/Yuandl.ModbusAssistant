@@ -6,7 +6,7 @@ export const SettingsPage: React.FC = () => {
   const { settings, updateSettings } = useAppContext();
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-5">
       <div>
         <h1 className="text-xl font-semibold">系统设置</h1>
         <p className="text-xs text-[var(--text-secondary)] mt-1">

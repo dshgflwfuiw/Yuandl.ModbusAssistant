@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, Play, Square, Activity, Table2, Columns2 } from 'lucide-react';
+import { Download, RefreshCw, Play, Square, Activity, Table2, Columns2, Save, FolderOpen } from 'lucide-react';
 import type {
   ModbusTransport,
   RegisterByteOrder,
@@ -29,6 +29,8 @@ interface RegisterRow {
 type MonitorSource = 'polling' | 'server';
 type ViewLayout = 'split' | 'scope' | 'table';
 type MonitorFunctionCode = 1 | 2 | 3 | 4;
+type MonitorPreset = { id: string; name: string; source: MonitorSource; functionCode: MonitorFunctionCode; slaveId: number; startAddress: number; registerCount: number; pollIntervalMs: number; selectedDataType: RegisterDataType; selectedByteOrder: RegisterByteOrder; scale: number };
+const PRESETS_KEY = 'yuandl.modbus.monitor-presets.v1';
 
 const DATA_TYPE_OPTIONS: RegisterDataType[] = [
   'Bool',
@@ -55,7 +57,7 @@ const BYTE_ORDER_LABELS: Record<RegisterByteOrder, string> = {
 const MAX_SCOPE_SAMPLES = 600;
 
 export const RegisterMonitorPage: React.FC = () => {
-  const { status, settings } = useAppContext();
+  const { status, settings, showSnackbar } = useAppContext();
 
   const [monitorSource, setMonitorSource] = useState<MonitorSource>('polling');
   const [viewLayout, setViewLayout] = useState<ViewLayout>('split');
@@ -80,6 +82,11 @@ export const RegisterMonitorPage: React.FC = () => {
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
   const [timeWindowSec, setTimeWindowSec] = useState<number>(60);
   const [channelOverrides, setChannelOverrides] = useState<Record<string, boolean>>({});
+  const [alertThreshold, setAlertThreshold] = useState<number | ''>('');
+  const [presets, setPresets] = useState<MonitorPreset[]>(() => {
+    try { return JSON.parse(window.localStorage.getItem(PRESETS_KEY) ?? '[]') as MonitorPreset[]; } catch { return []; }
+  });
+  const [selectedPresetId, setSelectedPresetId] = useState('');
 
   const inFlightRef = useRef(false);
   const notesRef = useRef(notesByKey);
@@ -130,11 +137,13 @@ export const RegisterMonitorPage: React.FC = () => {
     setRows(nextRows);
     if (nextRows.length > 0) {
       appendSample(sampleValues);
-      setStatusText(`实时监听内置服务器，共 ${nextRows.length} 个通道`);
+      setStatusText(alertThreshold !== '' && nextRows.some((row) => Math.abs(row.value) >= alertThreshold)
+        ? `阈值告警：至少一个通道达到 ±${alertThreshold}`
+        : `实时监听内置服务器，共 ${nextRows.length} 个通道`);
     } else {
       setStatusText('内置服务器暂无已定义的寄存器');
     }
-  }, [status.serverRegisters, appendSample]);
+  }, [status.serverRegisters, appendSample, alertThreshold]);
 
   // Trigger server snapshot automatically whenever serverRegisters updates in 'server' mode
   useEffect(() => {
@@ -217,7 +226,9 @@ export const RegisterMonitorPage: React.FC = () => {
           appendSample(sampleValues);
         }
         setStatusText(
-          `采集成功，${bits.length} 个布尔变量 (${new Date().toLocaleTimeString()})`
+        alertThreshold !== '' && nextRows.some((row) => Math.abs(row.value) >= alertThreshold)
+          ? `阈值告警：至少一个通道达到 ±${alertThreshold}`
+          : `采集成功，${bits.length} 个布尔变量 (${new Date().toLocaleTimeString()})`
         );
         return;
       }
@@ -255,7 +266,9 @@ export const RegisterMonitorPage: React.FC = () => {
         appendSample(sampleValues);
       }
       setStatusText(
-        `采集成功，${values.length} 个寄存器 (${new Date().toLocaleTimeString()})`
+      alertThreshold !== '' && nextRows.some((row) => Math.abs(row.value) >= alertThreshold)
+        ? `阈值告警：至少一个通道达到 ±${alertThreshold}`
+        : `采集成功，${values.length} 个寄存器 (${new Date().toLocaleTimeString()})`
       );
     } catch (err) {
       setStatusText(
@@ -277,6 +290,7 @@ export const RegisterMonitorPage: React.FC = () => {
     selectedDataType,
     selectedByteOrder,
     scale,
+    alertThreshold,
     settings.defaultTimeoutMs,
     settings.defaultRetryTimes,
     appendSample,
@@ -343,6 +357,40 @@ export const RegisterMonitorPage: React.FC = () => {
     setIsFrozen(false);
   };
 
+  const savePreset = () => {
+    const name = window.prompt('为当前监听配置命名');
+    if (!name?.trim()) return;
+    const preset: MonitorPreset = { id: crypto.randomUUID(), name: name.trim(), source: monitorSource, functionCode, slaveId, startAddress, registerCount, pollIntervalMs, selectedDataType, selectedByteOrder, scale };
+    const next = [...presets, preset];
+    setPresets(next);
+    window.localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
+    setSelectedPresetId(preset.id);
+    showSnackbar('监听方案已保存', name.trim(), 'success');
+  };
+
+  const loadPreset = () => {
+    const preset = presets.find((item) => item.id === selectedPresetId);
+    if (!preset) return;
+    handleSourceSwitch(preset.source);
+    setFunctionCode(preset.functionCode); setSlaveId(preset.slaveId); setStartAddress(preset.startAddress);
+    setRegisterCount(preset.registerCount); setPollIntervalMs(preset.pollIntervalMs);
+    setSelectedDataType(preset.selectedDataType); setSelectedByteOrder(preset.selectedByteOrder); setScale(preset.scale);
+  };
+
+  const removePreset = () => {
+    const next = presets.filter((item) => item.id !== selectedPresetId);
+    setPresets(next); window.localStorage.setItem(PRESETS_KEY, JSON.stringify(next)); setSelectedPresetId('');
+  };
+
+  const exportSamples = () => {
+    if (scopeSamples.length === 0) { showSnackbar('暂无采样数据', '先启动监听并采集数据后再导出', 'info'); return; }
+    const channelIds = [...new Set(scopeSamples.flatMap((sample) => Object.keys(sample.values)))];
+    const quote = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+    const csv = [['Timestamp', ...channelIds].map(quote).join(','), ...scopeSamples.map((sample) => [new Date(sample.timestampMs).toISOString(), ...channelIds.map((id) => sample.values[id] ?? '')].map(quote).join(','))].join('\r\n');
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = `modbus-samples-${new Date().toISOString().replaceAll(':', '-')}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
   const handleFunctionCodeChange = (nextFn: MonitorFunctionCode) => {
     setFunctionCode(nextFn);
     if ((nextFn === 3 || nextFn === 4) && registerCount > 125) {
@@ -351,7 +399,7 @@ export const RegisterMonitorPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-4">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-4">
       {/* 标题与视图切换 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -435,6 +483,22 @@ export const RegisterMonitorPage: React.FC = () => {
 
       {/* 采样控制面板 */}
       <div className="fluent-card p-4 space-y-3">
+        <div className="flex flex-wrap items-end gap-2 border-b border-[var(--border-subtle)] pb-3">
+          <div className="min-w-[180px] flex-1 sm:flex-none">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1" htmlFor="monitor-preset">监听方案</label>
+            <select id="monitor-preset" value={selectedPresetId} onChange={(e) => setSelectedPresetId(e.target.value)} className="fluent-input w-full sm:w-56">
+              <option value="">选择已保存方案</option>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+            </select>
+          </div>
+          <button type="button" onClick={savePreset} className="fluent-btn text-xs"><Save className="w-3.5 h-3.5" />保存当前方案</button>
+          <button type="button" disabled={!selectedPresetId} onClick={loadPreset} className="fluent-btn text-xs"><FolderOpen className="w-3.5 h-3.5" />载入</button>
+          <button type="button" disabled={!selectedPresetId} onClick={removePreset} className="fluent-btn text-xs">删除方案</button>
+          <button type="button" onClick={exportSamples} className="fluent-btn text-xs"><Download className="w-3.5 h-3.5" />导出采样 CSV</button>
+          <div>
+            <label className="block text-xs text-[var(--text-secondary)] mb-1" htmlFor="monitor-threshold">绝对值告警阈值</label>
+            <input id="monitor-threshold" type="number" min="0" step="any" value={alertThreshold} onChange={(e) => setAlertThreshold(e.target.value === '' ? '' : Number(e.target.value))} placeholder="关闭" className="fluent-input w-28" />
+          </div>
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           {monitorSource === 'polling' && (
             <>

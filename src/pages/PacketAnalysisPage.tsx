@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, Trash2, Radio, Pause } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Download, Search, Trash2, Radio, Pause } from 'lucide-react';
 import type { ModbusTransport } from '../core/types';
 import { useAppContext } from '../context/AppContext';
 
@@ -20,6 +20,18 @@ export const PacketAnalysisPage: React.FC = () => {
   const [manualTransport, setManualTransport] = useState<ModbusTransport>('Rtu');
   const [inputHex, setInputHex] = useState<string>('01 03 04 00 64 00 C8 FA 3D');
   const [analysisResult, setAnalysisResult] = useState<string>('');
+  const [directionFilter, setDirectionFilter] = useState<'all' | 'TX' | 'RX' | 'ERR'>('all');
+  const [functionCodeFilter, setFunctionCodeFilter] = useState('all');
+  const [searchText, setSearchText] = useState('');
+
+  const filteredEntries = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    return packetEntries.filter((entry) =>
+      (directionFilter === 'all' || entry.direction === directionFilter) &&
+      (functionCodeFilter === 'all' || new RegExp(`FC\\s+0x${functionCodeFilter}`, 'i').test(entry.result)) &&
+      (!query || `${entry.hex} ${entry.result} ${entry.sessionLabel ?? ''} ${entry.transport}`.toLowerCase().includes(query))
+    );
+  }, [packetEntries, directionFilter, functionCodeFilter, searchText]);
 
   const handleAnalyze = () => {
     const res = analyzeManualPacket(inputHex, manualTransport);
@@ -31,8 +43,24 @@ export const PacketAnalysisPage: React.FC = () => {
     setAnalysisResult('');
   };
 
+  const handleExport = () => {
+    if (filteredEntries.length === 0) return;
+    const quote = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+    const rows = [
+      ['时间', '方向', '协议', 'RTT(ms)', '会话', 'HEX', '解析结果'].map(quote).join(','),
+      ...filteredEntries.map((entry) => [entry.timestamp, entry.direction, entry.transport, entry.rttMs ?? '', entry.sessionLabel ?? '', entry.hex, entry.result].map(quote).join(',')),
+    ];
+    const blob = new Blob([`\uFEFF${rows.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `modbus-packets-${new Date().toISOString().replaceAll(':', '-')}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-4">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">报文分析</h1>
@@ -122,6 +150,24 @@ export const PacketAnalysisPage: React.FC = () => {
 
       <div className="fluent-card p-5 space-y-4">
         <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs text-[var(--text-secondary)]" htmlFor="packet-direction-filter">方向</label>
+          <select id="packet-direction-filter" value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value as typeof directionFilter)} className="fluent-input text-xs py-1.5">
+            <option value="all">全部</option><option value="TX">TX 发送</option><option value="RX">RX 接收</option><option value="ERR">ERR 错误</option>
+          </select>
+          <label className="text-xs text-[var(--text-secondary)]" htmlFor="packet-function-filter">功能码</label>
+          <select id="packet-function-filter" value={functionCodeFilter} onChange={(e) => setFunctionCodeFilter(e.target.value)} className="fluent-input text-xs py-1.5">
+            <option value="all">全部</option>
+            {[1, 2, 3, 4, 5, 6, 15, 16].map((fc) => <option key={fc} value={fc.toString(16).padStart(2, '0')}>FC 0x{fc.toString(16).toUpperCase().padStart(2, '0')}</option>)}
+          </select>
+          <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="搜索 HEX、解析结果或会话" aria-label="搜索报文" className="fluent-input text-xs min-w-[180px] flex-1" />
+          <button type="button" onClick={handleExport} disabled={filteredEntries.length === 0} className="fluent-btn text-xs" title="导出当前筛选结果">
+            <Download className="w-3.5 h-3.5" /><span>导出 CSV ({filteredEntries.length})</span>
+          </button>
+        </div>
+        <div className="text-[11px] text-[var(--text-secondary)]" aria-live="polite">
+          显示 {filteredEntries.length} 条 / 最多保留 500 条{packetEntries.length >= 500 ? '（已达到容量上限，旧记录会被移除）' : ''}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={manualTransport}
             onChange={(e) =>
@@ -141,7 +187,7 @@ export const PacketAnalysisPage: React.FC = () => {
             value={inputHex}
             onChange={(e) => setInputHex(e.target.value)}
             placeholder="手动输入待分析的 Modbus HEX 报文..."
-            className="fluent-input font-mono-code flex-1 min-w-[260px]"
+            className="fluent-input font-mono-code flex-1 min-w-0 sm:min-w-[260px]"
           />
 
           <button
@@ -176,7 +222,7 @@ export const PacketAnalysisPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {packetEntries.length === 0 ? (
+              {filteredEntries.length === 0 ? (
                 <tr>
                   <td
                     colSpan={6}
@@ -186,7 +232,7 @@ export const PacketAnalysisPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                packetEntries.map((entry) => (
+                filteredEntries.map((entry) => (
                   <tr
                     key={entry.id}
                     className="border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--surface-hover)]"

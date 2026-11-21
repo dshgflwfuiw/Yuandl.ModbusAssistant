@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Plus, Save, RefreshCw, Trash2, Plug } from 'lucide-react';
-import type { DeviceProfile } from '../core/types';
+import React, { useRef, useState } from 'react';
+import { Plus, Save, RefreshCw, Trash2, Plug, Upload, Download } from 'lucide-react';
+import type { DeviceProfile, ModbusServerConfiguration } from '../core/types';
 import { useAppContext } from '../context/AppContext';
 
 export const DeviceManagementPage: React.FC = () => {
@@ -12,6 +12,11 @@ export const DeviceManagementPage: React.FC = () => {
     setCommForm,
     setActivePage,
     showSnackbar,
+    status,
+    settings,
+    updateSettings,
+    refreshState,
+    persistServerConfig,
   } = useAppContext();
 
   const [newProfileName, setNewProfileName] = useState<string>('新设备');
@@ -19,6 +24,7 @@ export const DeviceManagementPage: React.FC = () => {
   const [newEndpoint, setNewEndpoint] = useState<string>('127.0.0.1:5020');
   const [newStationId, setNewStationId] = useState<number>(1);
   const [statusText, setStatusText] = useState<string>('就绪');
+  const workspaceInput = useRef<HTMLInputElement>(null);
 
   const handleAdd = async () => {
     await addProfile({
@@ -47,6 +53,40 @@ export const DeviceManagementPage: React.FC = () => {
   const handleReload = async () => {
     await reloadProfiles();
     setStatusText(`已加载 ${profiles.length} 个设备配置`);
+  };
+
+  const exportWorkspace = () => {
+    const security = status.serverSecurity ?? { bindAddress: '127.0.0.1', maxClients: 32, idleTimeoutMs: 60000, maxFrameLength: 260, sendQueueLimit: 64, allowedClientIps: '' };
+    const workspace = {
+      format: 'yuandl-modbus-workspace', version: 1,
+      profiles, settings: { isDarkTheme: settings.theme === 'dark', defaultTimeoutMs: settings.defaultTimeoutMs, defaultRetryTimes: settings.defaultRetryTimes },
+      serverConfig: {
+        version: 2, bindAddress: security.bindAddress, port: status.serverPort, station: status.serverStation,
+        maxClients: security.maxClients, idleTimeoutMs: security.idleTimeoutMs,
+        maxFrameLength: security.maxFrameLength, sendQueueLimit: security.sendQueueLimit,
+        allowedClientIps: security.allowedClientIps, serverMode: status.serverMode, serverSerial: status.serverSerial,
+        registers: status.serverRegisters.map(({ currentValue: _currentValue, ...definition }) => definition),
+      },
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(workspace, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'yuandl-modbus-workspace.json'; link.click(); URL.revokeObjectURL(url);
+  };
+
+  const importWorkspace = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text()) as { format?: string; version?: number; profiles?: DeviceProfile[]; settings?: { isDarkTheme?: boolean; theme?: 'light' | 'dark'; defaultTimeoutMs?: number; defaultRetryTimes?: number }; serverConfig?: ModbusServerConfiguration };
+      if (payload.format !== 'yuandl-modbus-workspace' || payload.version !== 1) throw new Error('不支持的工作区格式或版本');
+      if (!Array.isArray(payload.profiles) || !payload.settings || !payload.serverConfig) throw new Error('工作区文件缺少设备、设置或从站配置');
+      const serverConfig = payload.serverConfig;
+      if (!window.confirm(`将导入 ${payload.profiles.length} 个设备方案、系统设置和从站点表，并覆盖当前对应配置。继续吗？`)) return;
+      const response = await fetch('/api/state/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profiles: payload.profiles, settings: { theme: payload.settings.theme ?? (payload.settings.isDarkTheme ? 'dark' : 'light'), defaultTimeoutMs: payload.settings.defaultTimeoutMs ?? 1000, defaultRetryTimes: payload.settings.defaultRetryTimes ?? 2 }, serverConfig: payload.serverConfig }) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error || '导入失败');
+      await Promise.all([reloadProfiles(), updateSettings({ theme: payload.settings.theme ?? (payload.settings.isDarkTheme ? 'dark' : 'light'), defaultTimeoutMs: payload.settings.defaultTimeoutMs ?? 1000, defaultRetryTimes: payload.settings.defaultRetryTimes ?? 2 }), refreshState()]);
+      persistServerConfig(serverConfig);
+      showSnackbar('工作区已导入', '设备方案、系统设置和 Modbus 点表已恢复', 'success');
+    } catch (error) { showSnackbar('导入失败', error instanceof Error ? error.message : '文件格式错误', 'error'); }
+    finally { event.target.value = ''; }
   };
 
   const handleApplyToConnection = (profile: DeviceProfile) => {
@@ -79,7 +119,7 @@ export const DeviceManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-4">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-4">
       <div>
         <h1 className="text-xl font-semibold">设备管理</h1>
         <p className="text-xs text-[var(--text-secondary)] mt-1">
@@ -150,6 +190,9 @@ export const DeviceManagementPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <input ref={workspaceInput} type="file" accept="application/json,.json" className="hidden" onChange={importWorkspace} />
+          <button type="button" onClick={() => workspaceInput.current?.click()} className="fluent-btn"><Upload className="w-3.5 h-3.5" /><span>导入工作区</span></button>
+          <button type="button" onClick={exportWorkspace} className="fluent-btn"><Download className="w-3.5 h-3.5" /><span>导出工作区</span></button>
           <button type="button" onClick={handleSave} className="fluent-btn">
             <Save className="w-3.5 h-3.5" />
             <span>导出保存</span>

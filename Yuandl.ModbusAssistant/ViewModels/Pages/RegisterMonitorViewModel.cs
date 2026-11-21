@@ -449,6 +449,23 @@ public sealed class RegisterMonitorViewModel : ObservableObject, IDisposable
         return false;
     }
 
+    public void ReloadImportedConfiguration()
+    {
+        StopMonitoring("载入工作区");
+        _isInitializing = true;
+        try
+        {
+            PollingGroups.Clear();
+            _notesByKey.Clear();
+            LoadPollingConfiguration();
+        }
+        finally
+        {
+            _isInitializing = false;
+        }
+        SavePollingConfiguration();
+    }
+
     private void AttachPollingGroup(MonitorPollingGroup group)
     {
         group.PropertyChanged += (_, e) =>

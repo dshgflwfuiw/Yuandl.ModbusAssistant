@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Data;
 using Microsoft.Win32;
 using Yuandl.ModbusAssistant.Core.Enums;
 using Yuandl.ModbusAssistant.Core.Utils;
@@ -30,6 +32,8 @@ public sealed class PacketAnalysisViewModel : ObservableObject
     public PacketAnalysisViewModel(CommunicationService comm)
     {
         _comm = comm;
+        CapturedPacketsView = CollectionViewSource.GetDefaultView(CapturedPackets);
+        CapturedPacketsView.Filter = MatchesPacketFilter;
         _comm.TrafficCaptured += (_, e) => RunOnUi(() => HandleTraffic(e));
 
         ClearCommand = new RelayCommand(ClearAll);
@@ -38,6 +42,9 @@ public sealed class PacketAnalysisViewModel : ObservableObject
     }
 
     public ObservableCollection<AnalyzedPacketEntry> CapturedPackets { get; } = new();
+    public ICollectionView CapturedPacketsView { get; }
+    public IReadOnlyList<string> DirectionFilters { get; } = new[] { "全部", "TX", "RX", "ERR" };
+    public IReadOnlyList<string> FunctionCodeFilters { get; } = new[] { "全部", "01", "02", "03", "04", "05", "06", "0F", "10" };
     public IReadOnlyList<PacketCaptureTransportMode> CaptureModes { get; } = Enum.GetValues<PacketCaptureTransportMode>();
     public IReadOnlyList<ModbusTransport> ManualTransports { get; } = Enum.GetValues<ModbusTransport>();
 
@@ -49,6 +56,36 @@ public sealed class PacketAnalysisViewModel : ObservableObject
 
     private PacketCaptureTransportMode _captureTransport = PacketCaptureTransportMode.Auto;
     public PacketCaptureTransportMode CaptureTransport { get => _captureTransport; set => SetProperty(ref _captureTransport, value); }
+
+    private string _directionFilter = "全部";
+    public string DirectionFilter
+    {
+        get => _directionFilter;
+        set
+        {
+            if (SetProperty(ref _directionFilter, value)) CapturedPacketsView.Refresh();
+        }
+    }
+
+    private string _searchText = string.Empty;
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value)) CapturedPacketsView.Refresh();
+        }
+    }
+
+    private string _functionCodeFilter = "全部";
+    public string FunctionCodeFilter
+    {
+        get => _functionCodeFilter;
+        set
+        {
+            if (SetProperty(ref _functionCodeFilter, value)) CapturedPacketsView.Refresh();
+        }
+    }
 
     private int _totalPackets;
     public int TotalPackets { get => _totalPackets; private set => SetProperty(ref _totalPackets, value); }
@@ -77,7 +114,8 @@ public sealed class PacketAnalysisViewModel : ObservableObject
 
     private void ExportPackets()
     {
-        if (CapturedPackets.Count == 0)
+        var packets = CapturedPacketsView.Cast<AnalyzedPacketEntry>().ToList();
+        if (packets.Count == 0)
         {
             ManualResultText = "暂无可导出的捕获报文";
             return;
@@ -94,20 +132,33 @@ public sealed class PacketAnalysisViewModel : ObservableObject
         var sb = new StringBuilder();
         if (isTxt)
         {
-            foreach (var p in CapturedPackets.Reverse())
+            foreach (var p in packets.AsEnumerable().Reverse())
                 sb.AppendLine($"[{p.Timestamp}] [{p.Direction}] [{p.Transport}] RTT={p.RttText} HEX={p.Hex} | {p.Result}");
         }
         else
         {
-            sb.AppendLine("Timestamp,Direction,Transport,Rtt,Hex,Result");
-            foreach (var p in CapturedPackets.Reverse())
+            sb.AppendLine("Timestamp,Direction,Transport,Rtt,Session,Hex,Result");
+            foreach (var p in packets.AsEnumerable().Reverse())
             {
                 string result = (p.Result ?? string.Empty).Replace("\"", "\"\"");
-                sb.AppendLine($"{p.Timestamp},{p.Direction},{p.Transport},\"{p.RttText}\",\"{p.Hex}\",\"{result}\"");
+                string session = (p.SessionLabel ?? string.Empty).Replace("\"", "\"\"");
+                sb.AppendLine($"\"{p.Timestamp}\",\"{p.Direction}\",\"{p.Transport}\",\"{p.RttText}\",\"{session}\",\"{p.Hex}\",\"{result}\"");
             }
         }
         File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        ManualResultText = $"已导出 {CapturedPackets.Count} 条分析报文: {dlg.FileName}";
+        ManualResultText = $"已导出 {packets.Count} 条分析报文: {dlg.FileName}";
+    }
+
+    private bool MatchesPacketFilter(object item)
+    {
+        if (item is not AnalyzedPacketEntry packet) return false;
+        if (DirectionFilter != "全部" && !string.Equals(packet.Direction, DirectionFilter, StringComparison.OrdinalIgnoreCase)) return false;
+        if (FunctionCodeFilter != "全部" && !packet.Result.Contains($"FC 0x{FunctionCodeFilter}", StringComparison.OrdinalIgnoreCase)) return false;
+        var query = SearchText.Trim();
+        return query.Length == 0 || packet.Hex.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || packet.Result.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || (packet.SessionLabel?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+            || packet.Transport.ToString().Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     private void HandleTraffic(TrafficEventArgs e)

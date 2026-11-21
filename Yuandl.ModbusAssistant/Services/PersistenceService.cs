@@ -8,6 +8,13 @@ namespace Yuandl.ModbusAssistant.Services;
 
 public sealed class PersistenceService
 {
+    private static readonly JsonSerializerOptions PortableJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -79,6 +86,34 @@ public sealed class PersistenceService
             workspace.ServerConfig = MigrateServerConfig(workspace.ServerConfig);
             WriteFileAtomic(WorkspaceConfigPath, JsonSerializer.Serialize(workspace, JsonOptions));
         }
+    }
+
+    public static string SerializePortableWorkspace(WorkspaceConfiguration workspace)
+    {
+        var portable = new PortableWorkspaceFile
+        {
+            Settings = workspace.Settings,
+            Profiles = workspace.Profiles,
+            ServerConfig = workspace.ServerConfig,
+            MonitorConfig = workspace.MonitorConfig
+        };
+        return JsonSerializer.Serialize(portable, PortableJsonOptions);
+    }
+
+    public static WorkspaceConfiguration DeserializePortableWorkspace(string json)
+    {
+        var portable = JsonSerializer.Deserialize<PortableWorkspaceFile>(json, PortableJsonOptions)
+            ?? throw new InvalidDataException("工作区文件格式无效");
+        if (!string.Equals(portable.Format, "yuandl-modbus-workspace", StringComparison.OrdinalIgnoreCase) || portable.Version != 1)
+            throw new InvalidDataException("不支持的工作区格式或版本");
+        return new WorkspaceConfiguration
+        {
+            SchemaVersion = WorkspaceConfiguration.CurrentSchemaVersion,
+            Settings = portable.Settings ?? new AppSettings(),
+            Profiles = portable.Profiles ?? new List<DeviceProfile>(),
+            ServerConfig = portable.ServerConfig ?? new ModbusServerConfiguration(),
+            MonitorConfig = portable.MonitorConfig ?? new MonitorConfiguration()
+        };
     }
 
     public AppSettings LoadSettings() => LoadWorkspace().Settings;

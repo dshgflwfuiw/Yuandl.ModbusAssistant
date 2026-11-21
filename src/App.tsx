@@ -184,7 +184,7 @@ const MainShell: React.FC = () => {
       </div>
 
       {/* 底部工业通讯状态监视栏 */}
-      <footer className="min-h-[34px] shrink-0 px-4 py-1 flex items-center gap-3 sm:gap-4 text-xs border-t border-[var(--border-subtle)] bg-[var(--surface-secondary)] overflow-hidden">
+      <footer className="app-statusbar min-h-[34px] shrink-0 px-4 py-1 flex items-center gap-3 sm:gap-4 text-xs border-t border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
         {/* 1. 连接状态指示灯与文字 */}
         <div className="flex items-center gap-2 shrink-0">
           <span
@@ -198,7 +198,7 @@ const MainShell: React.FC = () => {
           <span>{status.stateText}</span>
         </div>
 
-        <span className="h-3.5 w-px bg-[var(--border-subtle)]" />
+        <span className="statusbar-divider h-3.5 w-px bg-[var(--border-subtle)]" />
 
         {/* 2. 通讯链路类型 */}
         <div className="flex items-center gap-1.5 shrink-0 max-w-[280px] truncate">
@@ -206,7 +206,7 @@ const MainShell: React.FC = () => {
           <span className="truncate">{status.communicationType}</span>
         </div>
 
-        <span className="h-3.5 w-px bg-[var(--border-subtle)]" />
+        <span className="statusbar-divider h-3.5 w-px bg-[var(--border-subtle)]" />
 
         {/* 3. 收发流量统计 */}
         <div className="flex items-center gap-2 shrink-0 tabular-nums">
@@ -220,7 +220,7 @@ const MainShell: React.FC = () => {
           </span>
         </div>
 
-        <span className="h-3.5 w-px bg-[var(--border-subtle)]" />
+        <span className="statusbar-divider h-3.5 w-px bg-[var(--border-subtle)]" />
 
         {/* 4. 通讯异常错误计数 */}
         <div className="flex items-center shrink-0 tabular-nums">
@@ -236,7 +236,7 @@ const MainShell: React.FC = () => {
           </strong>
         </div>
 
-        <div className="flex-1" />
+        <div className="statusbar-spacer flex-1" />
 
         {/* 5. 当前设备状态信息 */}
         <div className="flex items-center gap-1.5 min-w-0 truncate">

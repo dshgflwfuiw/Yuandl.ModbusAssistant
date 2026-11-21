@@ -205,7 +205,7 @@ export const ModbusDebugPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-4">
+    <div className="h-full overflow-y-auto p-3 sm:p-6 space-y-4">
       <div>
         <h1 className="text-xl font-semibold">Modbus 调试</h1>
         <p className="text-xs text-[var(--text-secondary)] mt-1">

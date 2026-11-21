@@ -265,6 +265,16 @@ public sealed class WorkspaceConfiguration
     public MonitorConfiguration MonitorConfig { get; set; } = new();
 }
 
+public sealed class PortableWorkspaceFile
+{
+    public string Format { get; set; } = "yuandl-modbus-workspace";
+    public int Version { get; set; } = 1;
+    public AppSettings Settings { get; set; } = new();
+    public List<DeviceProfile> Profiles { get; set; } = new();
+    public ModbusServerConfiguration ServerConfig { get; set; } = new();
+    public MonitorConfiguration MonitorConfig { get; set; } = new();
+}
+
 public sealed class MonitorPollingGroupConfiguration
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
